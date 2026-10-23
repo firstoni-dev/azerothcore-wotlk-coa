@@ -263,6 +263,10 @@ public:
         if (Named(info, 500154))
         {
             Cast(player, target, 572050);
+            if (!spell->IsTriggered())
+                for (Unit* enemy : Nearby(player, 8))
+                    if (enemy != target && player->IsValidAttackTarget(enemy) && player->isInFrontInMap(enemy, 8))
+                        Cast(player, enemy, 572050);
             if (damage && player->HasAura(680656))
                 Cast(player,player,1257670);
         }
@@ -293,8 +297,9 @@ public:
                 }
             }
         }
-        if ((info->Id == 800691 || info->Id == 802566) && damage && player->HasAura(807451))
-            Mana(player, CalculatePct(damage, Amount(807451)));
+        if (info->Id == 800691 || info->Id == 802566)
+            if (uint32 const dealt = spell->GetScriptHealthLeechDamage())
+                Mana(player, CalculatePct(dealt, Amount(807451)));
         if (healing && player->HasAura(300344) && target->HasAura(Bless, player->GetGUID()) &&
             !spell->IsTriggered() && !spell->GetScriptValue(300344))
         {
