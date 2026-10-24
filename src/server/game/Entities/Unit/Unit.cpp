@@ -9363,7 +9363,7 @@ float Unit::SpellPctDamageModsDone(Unit* victim, SpellInfo const* spellProto, Da
                 if (victim->HasAuraState(AURA_STATE_FROZEN, spellProto, this))
                 {
                     // Glyph of Ice Lance
-                    if (owner->HasAura(56377) && victim->GetLevel() > owner->GetLevel())
+                    if (owner->HasAuraOrTwin(56377) && victim->GetLevel() > owner->GetLevel())
                         DoneTotalMod *= 4.0f;
                     else
                         DoneTotalMod *= 3.0f;
@@ -9381,7 +9381,7 @@ float Unit::SpellPctDamageModsDone(Unit* victim, SpellInfo const* spellProto, Da
             if (spellProto->SpellFamilyFlags[0] & 0x800000)
             {
                 // Glyph of Shadow Word: Pain
-                if (AuraEffect* aurEff = GetAuraEffect(55687, 0))
+                if (AuraEffect* aurEff = GetAuraEffectOfRankedSpellOrTwin(55687, 0))
                     // Increase Mind Flay damage if Shadow Word: Pain present on target
                     if (victim->GetAuraEffect(SPELL_AURA_PERIODIC_DAMAGE, SPELLFAMILY_PRIEST, 0x8000, 0, 0, GetGUID()))
                         AddPct(DoneTotalMod, aurEff->GetAmount());
@@ -9396,7 +9396,7 @@ float Unit::SpellPctDamageModsDone(Unit* victim, SpellInfo const* spellProto, Da
             else if (spellProto->SpellFamilyFlags[0] & 0x80)
             {
                 // Glyph of Smite
-                if (AuraEffect* aurEff = GetAuraEffect(55692, 0))
+                if (AuraEffect* aurEff = GetAuraEffectOfRankedSpellOrTwin(55692, 0))
                     if (victim->GetAuraEffect(SPELL_AURA_PERIODIC_DAMAGE, SPELLFAMILY_PRIEST, 0x100000, 0, 0, GetGUID()))
                         AddPct(DoneTotalMod, aurEff->GetAmount());
             }
@@ -9404,7 +9404,7 @@ float Unit::SpellPctDamageModsDone(Unit* victim, SpellInfo const* spellProto, Da
             else if (spellProto->SpellFamilyFlags[1] & 0x2)
             {
                 // Glyph of Shadow Word: Death
-                if (AuraEffect* aurEff = GetAuraEffect(55682, 1))
+                if (AuraEffect* aurEff = GetAuraEffectOfRankedSpellOrTwin(55682, 1))
                     if (victim->HasAuraState(AURA_STATE_HEALTHLESS_35_PERCENT))
                         AddPct(DoneTotalMod, aurEff->GetAmount());
             }
@@ -9462,7 +9462,7 @@ float Unit::SpellPctDamageModsDone(Unit* victim, SpellInfo const* spellProto, Da
         case SPELLFAMILY_HUNTER:
             // Steady Shot
             if (spellProto->SpellFamilyFlags[1] & 0x1)
-                if (AuraEffect* aurEff = GetAuraEffect(56826, 0))  // Glyph of Steady Shot
+                if (AuraEffect* aurEff = GetAuraEffectOfRankedSpellOrTwin(56826, 0))  // Glyph of Steady Shot
                     if (victim->GetAuraEffect(SPELL_AURA_PERIODIC_DAMAGE, SPELLFAMILY_HUNTER, 0x00004000, 0, 0, GetGUID()))
                         AddPct(DoneTotalMod, aurEff->GetAmount());
             break;
@@ -10178,7 +10178,7 @@ float Unit::SpellTakenCritChance(Unit const* caster, SpellInfo const* spellProto
                             // Glyph of Fire Blast
                             if (spellProto->SpellFamilyFlags[0] == 0x2 && spellProto->SpellIconID == 12)
                                 if (HasAuraWithMechanic((1ULL << MECHANIC_STUN) | (1ULL << MECHANIC_KNOCKOUT)))
-                                    if (AuraEffect const* aurEff = caster->GetAuraEffect(56369, EFFECT_0))
+                                    if (AuraEffect const* aurEff = caster->GetAuraEffectOfRankedSpellOrTwin(56369, EFFECT_0))
                                         crit_chance += aurEff->GetAmount();
                             break;
                         case SPELLFAMILY_DRUID:
@@ -10255,7 +10255,7 @@ float Unit::SpellTakenCritChance(Unit const* caster, SpellInfo const* spellProto
                     if (spellProto->SpellFamilyFlags[1] & 0x100)
                     {
                         // Glyph of Victory Rush
-                        if (AuraEffect const* aurEff = caster->GetAuraEffect(58382, 0))
+                        if (AuraEffect const* aurEff = caster->GetAuraEffectOfRankedSpellOrTwin(58382, 0))
                             crit_chance += aurEff->GetAmount();
                         break;
                     }
