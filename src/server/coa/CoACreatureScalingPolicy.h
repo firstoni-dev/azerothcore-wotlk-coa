@@ -295,6 +295,7 @@ struct Settings
         { { 36, 2.2f }, { 43, 2.0f }, { 229, 4.0f }, { 389, 3.0f }, { 469, 5.0f } } };
     Multipliers damage{ Formula::Of(WorldDamageDefault), 1.5f, 1.0f, {} };
     Multipliers damageSpread{ Formula::Of(WorldDamageSpreadDefault), 0.0f, 0.0f, {} };
+    Multipliers spellDamage{ 1.0f, 1.0f, 1.0f, {} };
 };
 
 inline Context ContextOf(bool battlegroundOrArena, bool scriptedPrivateInstance, bool regularDifficulty, bool raid,

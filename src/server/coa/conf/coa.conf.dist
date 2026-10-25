@@ -81,6 +81,14 @@ CoA.CreatureScaling.World.DamageSpread = "max(1.55, 1.85 - 0.05 * level)"
 CoA.CreatureScaling.Dungeon.DamageSpread = 0
 CoA.CreatureScaling.Raid.DamageSpread = 0
 CoA.CreatureScaling.MapDamageSpread = ""
+# Spell and periodic damage from creatures. Damage above covers melee swings and melee/ranged spells (weapon strikes,
+# bleeds); every other spell takes SpellDamage instead. Live creature spells hit for about their spell data value at
+# the creature's own level in player combat logs (dungeons 10-44: median 0.85-1.13), so the default is unscaled.
+# Formulas and MapSpellDamage as above.
+CoA.CreatureScaling.World.SpellDamage = 1.0
+CoA.CreatureScaling.Dungeon.SpellDamage = 1.0
+CoA.CreatureScaling.Raid.SpellDamage = 1.0
+CoA.CreatureScaling.MapSpellDamage = ""
 
 # Live-like magic resistance for NPCs not controlled by players, including Holy
 # (docs/coa/monster-linear-resistance.md). Each combat level adds PerLevel resistance to every magic school;

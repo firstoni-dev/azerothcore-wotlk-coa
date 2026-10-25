@@ -11,6 +11,7 @@
 #include "Log.h"
 #include "Map.h"
 #include "QueryResult.h"
+#include "SpellInfo.h"
 #include "UnitScript.h"
 #include "WorldScript.h"
 #include <atomic>
@@ -83,12 +84,22 @@ namespace
         return DamageValue(target, attacker, &CreatureScaling::Settings::damage);
     }
 
+    // Weapon-based spells and bleeds grow with the creature's melee damage; other spells already carry their own
+    // per-level values (live creature spells hit for about their Spell.dbc value at the creature's own level).
+    float SpellDamageMultiplier(Unit const* target, Unit const* attacker, SpellInfo const* spellInfo)
+    {
+        if (spellInfo && (spellInfo->DmgClass == SPELL_DAMAGE_CLASS_MELEE ||
+            spellInfo->DmgClass == SPELL_DAMAGE_CLASS_RANGED))
+            return DamageMultiplier(target, attacker);
+        return DamageValue(target, attacker, &CreatureScaling::Settings::spellDamage);
+    }
+
     template <typename T>
-    void ScaleDamage(T& damage, Unit const* target, Unit const* attacker)
+    void ScaleDamage(T& damage, Unit const* target, Unit const* attacker, SpellInfo const* spellInfo)
     {
         if (damage <= 0)
             return;
-        if (float const multiplier = DamageMultiplier(target, attacker); multiplier != 1.0f)
+        if (float const multiplier = SpellDamageMultiplier(target, attacker, spellInfo); multiplier != 1.0f)
             damage = T(CreatureScaling::Scaled(uint32(damage), multiplier));
     }
 
@@ -117,6 +128,11 @@ namespace
 float CreatureScaling::DamageMultiplier(Unit const* target, Unit const* attacker)
 {
     return ::DamageMultiplier(target, attacker);
+}
+
+float CreatureScaling::SpellDamageMultiplier(Unit const* target, Unit const* attacker, SpellInfo const* spell)
+{
+    return ::SpellDamageMultiplier(target, attacker, spell);
 }
 
 CreatureScaling::TestOverride::TestOverride()
@@ -149,6 +165,7 @@ public:
         settings->health = ReadMultipliers("Health", defaults.health);
         settings->damage = ReadMultipliers("Damage", defaults.damage);
         settings->damageSpread = ReadMultipliers("DamageSpread", defaults.damageSpread);
+        settings->spellDamage = ReadMultipliers("SpellDamage", defaults.spellDamage);
         std::lock_guard<std::mutex> lock(SettingsMutex);
         Configured = std::move(settings);
         Publish();
@@ -167,12 +184,14 @@ public:
         }
         auto settings = Active();
         LOG_INFO("server.loading",
-            ">> CoA creature scaling {}: health {}/{}/{}, damage {}/{}/{}, damage spread {}/{}/{} (world/dungeon/raid), "
-            "{} map health overrides, {} flex health entries kept",
+            ">> CoA creature scaling {}: health {}/{}/{}, damage {}/{}/{}, damage spread {}/{}/{}, spell damage {}/{}/{} "
+            "(world/dungeon/raid), {} map health overrides, {} flex health entries kept",
             settings->enabled ? "enabled" : "disabled", settings->health.world.Text(), settings->health.dungeon.Text(),
             settings->health.raid.Text(), settings->damage.world.Text(), settings->damage.dungeon.Text(),
             settings->damage.raid.Text(), settings->damageSpread.world.Text(), settings->damageSpread.dungeon.Text(),
-            settings->damageSpread.raid.Text(), settings->health.maps.size(), FlexHealthEntries.size());
+            settings->damageSpread.raid.Text(), settings->spellDamage.world.Text(),
+            settings->spellDamage.dungeon.Text(), settings->spellDamage.raid.Text(), settings->health.maps.size(),
+            FlexHealthEntries.size());
     }
 };
 
@@ -217,13 +236,13 @@ public:
     void ModifySpellDamageTaken(Unit* target, Unit* attacker, int32& damage, SpellInfo const* spellInfo) override
     {
         if (!CoADungeonNormal::TunesSpell(attacker, spellInfo))
-            ScaleDamage(damage, target, attacker);
+            ScaleDamage(damage, target, attacker, spellInfo);
     }
 
     void ModifyPeriodicDamageAurasTick(Unit* target, Unit* attacker, uint32& damage, SpellInfo const* spellInfo) override
     {
         if (!CoADungeonNormal::TunesSpell(attacker, spellInfo))
-            ScaleDamage(damage, target, attacker);
+            ScaleDamage(damage, target, attacker, spellInfo);
     }
 };
 

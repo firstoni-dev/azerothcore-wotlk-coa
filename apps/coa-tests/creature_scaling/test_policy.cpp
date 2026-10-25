@@ -103,6 +103,9 @@ int main()
     assert(Near(Multiplier(settings.damageSpread, Context::World, 0, 60), 1.55f));
     assert(Multiplier(settings.damageSpread, Context::Dungeon, 36, 20) == 0.0f);
     assert(Multiplier(settings.damageSpread, Context::Raid, 409, 63) == 0.0f);
+    assert(Multiplier(settings.spellDamage, Context::World, 0, 60) == 1.0f);
+    assert(Multiplier(settings.spellDamage, Context::Dungeon, 36, 20) == 1.0f);
+    assert(Multiplier(settings.spellDamage, Context::Raid, 409, 63) == 1.0f);
     float low = 1.55f;
     float high = 1.68f;
     ScaleRange(low, high, 4.0f, 1.55f);

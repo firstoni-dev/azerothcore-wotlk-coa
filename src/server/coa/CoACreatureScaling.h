@@ -2,11 +2,14 @@
 #ifndef COA_CREATURE_SCALING_H
 #define COA_CREATURE_SCALING_H
 
+class SpellInfo;
 class Unit;
 
 namespace CreatureScaling
 {
 float DamageMultiplier(Unit const* target, Unit const* attacker);
+// The multiplier applied to spell: melee and ranged spells take the melee damage factor, other spells SpellDamage.
+float SpellDamageMultiplier(Unit const* target, Unit const* attacker, SpellInfo const* spell);
 
 class TestOverride
 {
