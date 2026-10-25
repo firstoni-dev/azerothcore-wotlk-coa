@@ -3167,7 +3167,10 @@ private:
             {
                 uint32 damage = 1000;
                 sScriptMgr->ModifyMeleeDamage(player, attacker, damage);
-                return damage;
+                float minDamage = float(damage);
+                float maxDamage = float(damage);
+                sScriptMgr->ModifyMeleeDamageRange(player, attacker, minDamage, maxDamage);
+                return (minDamage + maxDamage) / 2.0f;
             }
             Require(info != nullptr, "Unknown spell for scripted damage taken");
             if (metric == "script_spell_damage_taken")
