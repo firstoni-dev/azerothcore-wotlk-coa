@@ -113,6 +113,19 @@ float playerBaseMoveSpeed[MAX_MOVE_TYPE] =
     3.14f                  // MOVE_PITCH_RATE
 };
 
+static bool UsesLinearMonsterResistance(Unit const* victim, SpellSchoolMask schoolMask)
+{
+    return victim && victim->IsCreature() && !victim->IsControlledByPlayer() &&
+        !(schoolMask & SPELL_SCHOOL_MASK_NORMAL) && sWorld->getBoolConfig(CONFIG_MONSTER_RESISTANCE_ENABLE);
+}
+
+static bool DealsSpellDamage(SpellInfo const* spellInfo)
+{
+    return spellInfo->HasEffect(SPELL_EFFECT_SCHOOL_DAMAGE) || spellInfo->HasEffect(SPELL_EFFECT_HEALTH_LEECH) ||
+        spellInfo->HasAura(SPELL_AURA_PERIODIC_DAMAGE) || spellInfo->HasAura(SPELL_AURA_PERIODIC_LEECH) ||
+        spellInfo->HasAura(SPELL_AURA_PERIODIC_DAMAGE_PERCENT);
+}
+
 static bool IsClassicPlusCombat(Unit const* attacker, Unit const* victim)
 {
     return sWorld->getBoolConfig(CONFIG_CLASSIC_PLUS_COMBAT_RULES) &&
@@ -2529,6 +2542,29 @@ uint32 Unit::CalcArmorReducedDamage(Unit const* attacker, Unit const* victim, co
 float Unit::GetEffectiveResistChance(Unit const* owner, SpellSchoolMask schoolMask, Unit const* victim, SpellInfo const* spellInfo /*= nullptr*/)
 {
     float victimResistance = static_cast<float>(victim->GetResistance(schoolMask));
+    bool const linearResistance = UsesLinearMonsterResistance(victim, schoolMask);
+    if (linearResistance)
+    {
+        float const levelResistance = float(victim->getLevelForTarget(owner)) *
+            sWorld->getFloatConfig(CONFIG_MONSTER_RESISTANCE_PER_LEVEL);
+        bool firstSchool = true;
+        for (uint32 school = SPELL_SCHOOL_HOLY; school < MAX_SPELL_SCHOOL; ++school)
+        {
+            if (!(schoolMask & (1u << school)))
+                continue;
+
+            UnitMods const unitMod = UnitMods(UNIT_MOD_RESISTANCE_START + school);
+            float resistance = victim->GetFlatModifierValue(unitMod, BASE_VALUE) + levelResistance;
+            resistance *= victim->GetPctModifierValue(unitMod, BASE_PCT);
+            resistance += victim->GetFlatModifierValue(unitMod, TOTAL_VALUE);
+            resistance *= std::max(0.0f, victim->GetPctModifierValue(unitMod, TOTAL_PCT));
+            if (firstSchool || resistance < victimResistance)
+            {
+                victimResistance = resistance;
+                firstSchool = false;
+            }
+        }
+    }
     if (owner)
     {
         // Xinef: pets inherit 100% of masters penetration
@@ -2544,6 +2580,10 @@ float Unit::GetEffectiveResistChance(Unit const* owner, SpellSchoolMask schoolMa
     }
 
     victimResistance = std::max(victimResistance, 0.0f);
+
+    if (linearResistance)
+        return std::min(victimResistance / sWorld->getFloatConfig(CONFIG_MONSTER_RESISTANCE_PER_PERCENT) / 100.0f,
+            sWorld->getFloatConfig(CONFIG_MONSTER_RESISTANCE_MAX_REDUCTION_PCT) / 100.0f);
 
     if (owner && IsClassicPlusCombat(owner, victim))
     {
@@ -2588,12 +2628,13 @@ void Unit::CalcAbsorbResist(DamageInfo& dmgInfo, bool Splited)
     // Magic damage, check for resists
     // Ignore spells that cant be resisted
     // Xinef: holy resistance exists for npcs
-    if (!(schoolMask & SPELL_SCHOOL_MASK_NORMAL) && (!(schoolMask & SPELL_SCHOOL_MASK_HOLY) || victim->IsCreature()) && (!spellInfo || (!spellInfo->HasAttribute(SPELL_ATTR0_CU_BINARY_SPELL) && !spellInfo->HasAttribute(SPELL_ATTR4_NO_CAST_LOG))))
+    bool const linearResistance = UsesLinearMonsterResistance(victim, schoolMask);
+    if (!(schoolMask & SPELL_SCHOOL_MASK_NORMAL) && (!(schoolMask & SPELL_SCHOOL_MASK_HOLY) || victim->IsCreature()) && (!spellInfo || ((linearResistance || !spellInfo->HasAttribute(SPELL_ATTR0_CU_BINARY_SPELL)) && !spellInfo->HasAttribute(SPELL_ATTR4_NO_CAST_LOG))))
     {
         float averageResist = Unit::GetEffectiveResistChance(attacker, schoolMask, victim);
         float damageResisted = 0.0f;
 
-        if (attacker && IsClassicPlusCombat(attacker, victim))
+        if (!linearResistance && attacker && IsClassicPlusCombat(attacker, victim))
         {
             if (dmgInfo.GetDamageType() == DOT && spellInfo &&
                 !ClassicPlusCombat::ResistsDotAsDirectDamage(spellInfo->Id))
@@ -3984,7 +4025,9 @@ SpellMissInfo Unit::MagicSpellHitResult(Unit* victim, SpellInfo const* spellInfo
             tmp += victim->GetMaxNegativeAuraModifierByMiscValue(SPELL_AURA_MOD_DEBUFF_RESISTANCE, int32(spellInfo->Dispel)) * 100;
         }
 
-        if (spellInfo->HasAttribute(SPELL_ATTR0_CU_BINARY_SPELL) && (spellInfo->GetSchoolMask() & (SPELL_SCHOOL_MASK_NORMAL | SPELL_SCHOOL_MASK_HOLY)) == 0)
+        if (spellInfo->HasAttribute(SPELL_ATTR0_CU_BINARY_SPELL) &&
+            !(UsesLinearMonsterResistance(victim, spellInfo->GetSchoolMask()) && DealsSpellDamage(spellInfo)) &&
+            (spellInfo->GetSchoolMask() & (SPELL_SCHOOL_MASK_NORMAL | SPELL_SCHOOL_MASK_HOLY)) == 0)
         {
             float const resistChance =
                 Unit::GetEffectiveResistChance(this, spellInfo->GetSchoolMask(), victim, spellInfo);
@@ -12532,7 +12575,10 @@ Unit* Creature::SelectVictim()
     Unit* target = nullptr;
 
     if (CanHaveThreatList())
+    {
+        EndCombatWithUnitsLeftBehind();
         target = m_threatManager.GetCurrentVictim();
+    }
     else if (!HasReactState(REACT_PASSIVE))
     {
         // we have player pet probably
@@ -12555,7 +12601,7 @@ Unit* Creature::SelectVictim()
     else
         return nullptr;
 
-    if (target && _IsTargetAcceptable(target) && CanCreatureAttack(target))
+    if (target && _IsTargetAcceptable(target) && CanCreatureAttack(target, IsNpcFightingMe(target)))
     {
         if (!HasSpellFocus())
             SetInFront(target);
@@ -12566,7 +12612,24 @@ Unit* Creature::SelectVictim()
     // end the bidirectional combat reference and remove us from their threat list,
     // causing them to lose their target (e.g. an NPC fighting a guardian whose
     // CanAIAttack rejects the NPC).
-    if (!m_threatManager.GetThreatenedByMeList().empty())
+    // A victim lost only to the leash must not keep us chasing it while an NPC is hitting us:
+    // turn on an NPC that is fighting us, or evade.
+    bool const lostVictimToLeash = target && _IsTargetAcceptable(target) && CanCreatureAttack(target, true);
+    if (lostVictimToLeash)
+    {
+        for (ThreatReference const* ref : m_threatManager.GetSortedThreatList())
+        {
+            Unit* attacker = ref->GetVictim();
+            if (attacker != target && IsNpcFightingMe(attacker) && _IsTargetAcceptable(attacker)
+                && CanCreatureAttack(attacker, true))
+            {
+                if (!HasSpellFocus())
+                    SetInFront(attacker);
+                return attacker;
+            }
+        }
+    }
+    else if (!m_threatManager.GetThreatenedByMeList().empty())
         return nullptr;
 
     if (GetVehicle())
@@ -15149,15 +15212,22 @@ namespace
         void Visit(std::unordered_map<ObjectGuid, T*>&) { }
     };
 
+    bool IsBossCreature(Creature const* creature)
+    {
+        return creature->IsDungeonBoss() || creature->isWorldBoss()
+            || creature->GetCreatureTemplate()->rank == CREATURE_ELITE_WORLDBOSS;
+    }
+
     // CoA: when a boss dies in an instance, the adds and totems it summoned (and
     // what those summoned in turn) despawn with it. Runs before the boss's
-    // JustDied, so anything its script summons on death stays.
+    // JustDied, so anything its script summons on death stays. A boss it summoned
+    // stays too: Majordomo Executus summons Ragnaros, who then kills him.
     void DespawnBossSummons(Creature* boss)
     {
         Map* map = boss->GetMap();
         if (!map || !map->Instanceable() || boss->IsCharmedOwnedByPlayerOrPlayer())
             return;
-        if (!boss->IsDungeonBoss() && !boss->isWorldBoss() && boss->GetCreatureTemplate()->rank != CREATURE_ELITE_WORLDBOSS)
+        if (!IsBossCreature(boss))
             return;
 
         BossSummonCollector collector;
@@ -15172,7 +15242,7 @@ namespace
             added = false;
             for (Creature* summon : collector.summons)
             {
-                if (summon->IsCharmedOwnedByPlayerOrPlayer() || summon->IsDungeonBoss() || !summon->IsHostileToPlayers())
+                if (summon->IsCharmedOwnedByPlayerOrPlayer() || IsBossCreature(summon) || !summon->IsHostileToPlayers())
                     continue;
                 if (parents.count(summon->ToTempSummon()->GetSummonerGUID()) && parents.insert(summon->GetGUID()).second)
                 {
@@ -17844,9 +17914,6 @@ bool Unit::SetSwim(bool enable)
  */
 void Unit::SetCanFly(bool enable)
 {
-    if (enable && IsPlayer() && !ToPlayer()->IsGameMaster())
-        enable = false;
-
     bool isClientControlled = IsClientControlled();
 
     if (!isClientControlled)

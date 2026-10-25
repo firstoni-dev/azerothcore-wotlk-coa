@@ -265,7 +265,6 @@ std::unordered_map<std::uint32_t, std::uint32_t> TaughtSpells()
     {
         ClientDBC::Record const record = spells.GetRecord(index);
         std::string_view const description = record.GetString(SPELL_DESCRIPTION);
-        // "Teaches you" opens a line: the first, or the one after a prerequisite line ("@req:12294@")
         std::size_t const teaches = description.starts_with("Teaches you") ? 0 : description.find("\nTeaches you");
         if (teaches == std::string_view::npos)
             continue;
@@ -724,6 +723,23 @@ Slots GuideSlots(Catalog const& catalog, Character const& character, Slots const
         if (current[slot])
             place(current[slot]);
     return slots;
+}
+
+std::vector<std::uint32_t> GuideLessons(Catalog const& catalog, Character const& character,
+    std::vector<GuideEnchant> const& guide)
+{
+    std::vector<std::uint32_t> lessons;
+    if (character.Wildcard())
+        return lessons;
+    for (GuideEnchant const& entry : guide)
+    {
+        Enchant const* enchant = catalog.FindSpell(entry.Spell);
+        if (enchant && entry.Level <= character.Level && !character.Knows(entry.Spell) &&
+            RealmAllows(*enchant, character.RealmGates) && ClassAllowed(*enchant, character.Class) &&
+            std::find(lessons.begin(), lessons.end(), entry.Spell) == lessons.end())
+            lessons.push_back(entry.Spell);
+    }
+    return lessons;
 }
 
 bool Character::Knows(std::uint32_t spell) const

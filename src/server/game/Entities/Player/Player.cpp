@@ -2510,7 +2510,7 @@ void Player::SendLogXPGain(uint32 GivenXP, Unit* victim, uint32 BonusXP, bool re
     SendDirectMessage(&data);
 }
 
-void Player::GiveXP(uint32 xp, Unit* victim, float group_rate, bool isLFGReward)
+void Player::GiveXP(uint32 xp, Unit* victim, float group_rate, bool isLFGReward, PlayerXPSource xpSource)
 {
     if (xp < 1)
         return;
@@ -2565,9 +2565,10 @@ void Player::GiveXP(uint32 xp, Unit* victim, float group_rate, bool isLFGReward)
     uint32 curXP = GetUInt32Value(PLAYER_XP);
     uint32 nextLvlXP = GetUInt32Value(PLAYER_NEXT_LEVEL_XP);
     uint32 bonusLimit = xp;
-    bool recruitAFriend = !noBonusExperience && GetsRecruitAFriendBonus(true);
+    bool recruitAFriend = xpSource != XPSOURCE_PROFESSION && xpSource != XPSOURCE_PROFESSION_SKILL &&
+        !noBonusExperience && GetsRecruitAFriendBonus(true);
     if (recruitAFriend)
-        bonusLimit = 2 * xp;
+        bonusLimit = xp / 2;
 
     if (levelCap < maxLevel)
     {
@@ -7243,7 +7244,7 @@ void Player::_ApplyItemBonuses(ItemTemplate const* proto, uint8 slot, bool apply
             ApplySpellPowerBonus(spellbonus, apply);
 
     // If set ScalingStatValue armor get it or use item armor
-    uint32 armor = proto->Armor;
+    uint32 armor = LocalLevelScaling::WornArmorFor(this, proto, proto->Armor);
     if (ssv)
     {
         if (uint32 ssvarmor = ssv->getArmorMod(ScalingStatValue))
@@ -11733,6 +11734,9 @@ void Player::AddSpellAndCategoryCooldowns(SpellInfo const* spellInfo, uint32 ite
                     continue;
                 }
 
+                if (!itemId && !categorySpellInfo->CategoryRecoveryTime)
+                    continue;
+
                 _AddSpellCooldown(i_scset->second, cat, itemId, catrecTime, !spellInfo->IsCooldownStartedOnEvent() && catrec && rec && catrec != rec);
 
                 if (spellInfo->HasAttribute(SPELL_ATTR0_CU_FORCE_SEND_CATEGORY_COOLDOWNS))
@@ -13534,7 +13538,7 @@ bool Player::GetsRecruitAFriendBonus(bool forXP)
                 if (!player || !player->IsInMap(this))
                     continue;
 
-                if (!player->IsAtRecruitAFriendDistance(this))
+                if (!player->IsAtRecruitAFriendDistance(this, forXP))
                     continue;                               // member (alive or dead) or his corpse at req. distance
 
                 if (forXP)
@@ -13633,7 +13637,7 @@ bool Player::IsAtLootRewardDistance(WorldObject const* pRewardSource) const
     return pRewardSource->HasAllowedLooter(GetGUID());
 }
 
-bool Player::IsAtRecruitAFriendDistance(WorldObject const* pOther) const
+bool Player::IsAtRecruitAFriendDistance(WorldObject const* pOther, bool forXP) const
 {
     if (!pOther)
         return false;
@@ -13644,7 +13648,7 @@ bool Player::IsAtRecruitAFriendDistance(WorldObject const* pOther) const
     if (player->GetMapId() != pOther->GetMapId() || player->GetInstanceId() != pOther->GetInstanceId())
         return false;
 
-    return pOther->GetDistance(player) <= sWorld->getFloatConfig(CONFIG_MAX_RECRUIT_A_FRIEND_DISTANCE);
+    return pOther->GetDistance(player) <= sWorld->getFloatConfig(forXP ? CONFIG_MAX_RECRUIT_A_FRIEND_XP_DISTANCE : CONFIG_MAX_RECRUIT_A_FRIEND_DISTANCE);
 }
 
 uint32 Player::GetBaseWeaponSkillValue(WeaponAttackType attType) const
@@ -16397,12 +16401,13 @@ void Player::ActivateSpec(uint8 spec)
     sScriptMgr->OnPlayerAfterSpecSlotChanged(this, GetActiveSpec());
 }
 
-void Player::LoadActions(PreparedQueryResult result)
+void Player::LoadActions(PreparedQueryResult result, bool send)
 {
     if (result)
         _LoadActions(result);
 
-    SendActionButtons(1);
+    if (send)
+        SendActionButtons(1);
 }
 
 void Player::GetTalentTreePoints(uint8 (&specPoints)[3]) const
