@@ -284,7 +284,6 @@ struct Multipliers
     std::map<std::uint32_t, Formula> maps;
 };
 
-// Only the open world has a measured creature spell factor; dungeons and raids have none of their own.
 struct SpellMultipliers
 {
     Formula world;
@@ -332,8 +331,6 @@ inline float Multiplier(Multipliers const& multipliers, Context context, std::ui
     }
 }
 
-// Melee and ranged spells (weapon strikes, bleeds) take the melee damage factor. Other spells take SpellDamage in the
-// open world and on MapSpellDamage maps; in dungeons and raids they keep the melee damage factor.
 inline float SpellMultiplier(Settings const& settings, Context context, std::uint32_t mapId, std::uint8_t level,
     bool weaponSpell)
 {

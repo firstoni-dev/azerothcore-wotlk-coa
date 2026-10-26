@@ -65,7 +65,6 @@ namespace
             map->IsRegularDifficulty(), map->IsRaid(), map->IsDungeon());
     }
 
-    // The creature attacking a player (or a player's pet) whose damage is scaled, or nullptr.
     Creature const* ScaledAttacker(Unit const* target, Unit const* attacker, CreatureScaling::Context& context)
     {
         if (!Enabled || !target || !attacker || !target->GetCharmerOrOwnerPlayerOrPlayerItself())
@@ -92,9 +91,6 @@ namespace
         return DamageValue(target, attacker, &CreatureScaling::Settings::damage);
     }
 
-    // Weapon-based spells and bleeds grow with the creature's melee damage; in the open world other spells already
-    // carry their own per-level values (live creature spells hit for about their Spell.dbc value at the creature's own
-    // level).
     float SpellDamageMultiplier(Unit const* target, Unit const* attacker, SpellInfo const* spellInfo)
     {
         CreatureScaling::Context context;
