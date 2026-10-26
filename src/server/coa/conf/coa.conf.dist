@@ -28,6 +28,13 @@ CoA.AllowRemoteClients = 0
 # 0 - Create a Hero. Use this on a realm with CoA.ClassModel = "hero".
 CoA.MapClass10ToWarrior = 1
 
+# Client lab probe relay: the admin command .labprobe whispers read-only CoaProbe requests to an
+# online lab character as addon messages and collects the chunked answers the addon whispers back.
+# Accepted only for accounts whose name starts with CoA.ProbeRelay.AccountPrefix (case-insensitive).
+# Enable only on a lab server. Default: 0.
+CoA.ProbeRelay.Enable = 0
+CoA.ProbeRelay.AccountPrefix = "COALAB"
+
 # Log each consumed extension packet during protocol discovery.
 CoA.LogConsumedPackets = 1
 
@@ -434,21 +441,33 @@ HighRisk.FelCommutation.ToggleAnywhere = 0
 HighRisk.FelCommutation.ClickToggle = 0
 
 #    PvpPower.Enable
-#        Description: Item spells named "PvP Power (+N)" scale damage and healing at level 60, capped at
-#                     495 points. Damage +0.05% per point against players (and against uncontrolled
+#        Description: PvP Power on equipped items (the value in ItemAddon.dbc, else the item's "PvP Power
+#                     (+N)" spell) scales damage and healing at level 60, capped at 495 points. Damage +0.05% per point against players (and against uncontrolled
 #                     creatures for a High-Risk attacker in the open world); creature damage received
 #                     there -0.05% per point; healing and shields +0.02% per point in War Mode,
 #                     High-Risk open world and battlegrounds.
-#        Default:     0 - (Disabled)
-#                     1 - (Enabled)
+#        Default:     1 - (Enabled)
+#                     0 - (Disabled)
 
-PvpPower.Enable = 0
+PvpPower.Enable = 1
+
+#    PvePower.Enable
+#        Description: PvE Power on equipped items (the value in ItemAddon.dbc, else the item's "PvE Power
+#                     (+N)" spell) scales damage and healing at level 60, capped at 495 points. Damage dealt to creatures +0.05% per point and damage received from
+#                     creatures -0.05% per point on every map; healing and shields +0.02% per point in
+#                     dungeons and raids. Stacks with PvP Power.
+#        Default:     1 - (Enabled)
+#                     0 - (Disabled)
+
+PvePower.Enable = 1
 
 #    Bloodforged.Enable
-#        Description: Adds one independent Bloodforged roll to eligible open-world creature corpses
-#                     for High-Risk players from level 15, drawn from the reviewed catalogue in
-#                     coa_bloodforged_catalogue. The item and rate band follow the player's level;
-#                     creatures grey to the player give no roll. Requires PvpPower.Enable.
+#        Description: Adds Bloodforged equipment to the native loot roll of eligible open-world
+#                     creature corpses for High-Risk players from level 15, drawn from the reviewed
+#                     catalogue in coa_bloodforged_catalogue. The item pool and rate band follow the
+#                     player's level; creatures grey to the player give no roll. Drops obey the
+#                     standard corpse item limit and are scaled by Rate.Drop.Item.Uncommon, .Rare and
+#                     .Epic. Requires PvpPower.Enable.
 #        Default:     0 - (Disabled)
 #                     1 - (Enabled)
 
@@ -459,8 +478,9 @@ Bloodforged.Enable = 0
 #    Bloodforged.Rates35
 #    Bloodforged.Rates45
 #    Bloodforged.Rates55
-#        Description: Percent per eligible corpse for the level band starting at that level, as three
-#                     values: uncommon, rare, epic. Independent rolls, one quality per roll.
+#        Description: Base percent per eligible corpse for the level band starting at that level, as
+#                     three values: uncommon, rare, epic. One roll per quality, spread evenly across
+#                     that quality's pool, before the Rate.Drop.Item.* multipliers.
 #        Default:     "4.50 0.50 0.00", "4.00 1.00 0.00", "3.80 1.40 0.15", "3.60 1.80 0.25", "3.40 2.20 0.40"
 
 Bloodforged.Rates15 = "4.50 0.50 0.00"
@@ -498,11 +518,12 @@ Ascension.PrestigiousCache.SecondTokenChancePercent = 5
 
 #
 #    Ascension.PrestigiousCache.ClassicStages
-#        Description: How many of the Classic Prestigious Caches are released, 0-8, in the
-#                     order 1287304 held for Heroic Dungeons, Zul'Gurub, Molten Core,
+#        Description: Additional Classic pool limit, 0-8. Pools must also be released by
+#                     Ascension.CallboardCache.ReleaseStage. Existing tier caches obey both limits.
+#                     Pool order: 1287304 onwards for Heroic Dungeons, Zul'Gurub, Molten Core,
 #                     Onyxia, Blackwing Lair, Ruins of Ahn'Qiraj, Temple of Ahn'Qiraj,
 #                     Naxxramas. The generic "most recent Prestigious Cache available"
-#                     resolves to the newest released one.
+#                     resolves to the newest allowed populated pool.
 #        Default:     8
 
 Ascension.PrestigiousCache.ClassicStages = 8
