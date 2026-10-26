@@ -3667,6 +3667,34 @@ private:
             Require(creature != nullptr, "Creature health metric needs a living nearby creature");
             return 100.0 * creature->GetHealth() / creature->GetMaxHealth();
         }
+        if (metric == "nearby_creature_can_attack")
+        {
+            Creature* creature = player->FindNearestCreature(step.get<uint32>("entry"), 60.0f, true);
+            Require(creature != nullptr, "Creature attack metric needs a living nearby creature");
+            return player->IsValidAttackTarget(creature) ? 1 : 0;
+        }
+        if (metric == "nearby_creature_mount_display")
+        {
+            Creature* creature = player->FindNearestCreature(step.get<uint32>("entry"), 60.0f, true);
+            Require(creature != nullptr, "Creature mount metric needs a living nearby creature");
+            return creature->GetMountID();
+        }
+        if (metric == "nearby_creature_display")
+        {
+            Creature* creature = player->FindNearestCreature(step.get<uint32>("entry"), 60.0f, true);
+            Require(creature != nullptr, "Creature display metric needs a living nearby creature");
+            return creature->GetDisplayId();
+        }
+        if (metric == "nearby_creature_aura_count")
+        {
+            std::list<Creature*> creatures;
+            player->GetCreatureListWithEntryInGrid(creatures, step.get<uint32>("entry"), 60.0f);
+            uint32 const spell = step.get<uint32>("spell");
+            return std::count_if(creatures.begin(), creatures.end(), [spell](Creature const* creature)
+            {
+                return creature->IsAlive() && creature->HasAura(spell);
+            });
+        }
         if (metric == "nearby_creature_sent_spellclick")
         {
             Creature* creature = player->FindNearestCreature(step.get<uint32>("entry"), 60.0f, true);
