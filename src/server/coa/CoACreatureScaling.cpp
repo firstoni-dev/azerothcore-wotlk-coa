@@ -65,16 +65,24 @@ namespace
             map->IsRegularDifficulty(), map->IsRaid(), map->IsDungeon());
     }
 
+    // The creature attacking a player (or a player's pet) whose damage is scaled, or nullptr.
+    Creature const* ScaledAttacker(Unit const* target, Unit const* attacker, CreatureScaling::Context& context)
+    {
+        if (!Enabled || !target || !attacker || !target->GetCharmerOrOwnerPlayerOrPlayerItself())
+            return nullptr;
+        Creature const* creature = attacker->ToCreature();
+        if (!IsEligible(creature) || creature->IsFriendlyTo(target))
+            return nullptr;
+        context = ContextOf(creature);
+        return context == CreatureScaling::Context::None ? nullptr : creature;
+    }
+
     float DamageValue(Unit const* target, Unit const* attacker,
         CreatureScaling::Multipliers CreatureScaling::Settings::* values)
     {
-        if (!Enabled || !target || !attacker || !target->GetCharmerOrOwnerPlayerOrPlayerItself())
-            return 1.0f;
-        Creature const* creature = attacker->ToCreature();
-        if (!IsEligible(creature) || creature->IsFriendlyTo(target))
-            return 1.0f;
-        CreatureScaling::Context const context = ContextOf(creature);
-        if (context == CreatureScaling::Context::None)
+        CreatureScaling::Context context;
+        Creature const* creature = ScaledAttacker(target, attacker, context);
+        if (!creature)
             return 1.0f;
         return CreatureScaling::Multiplier((*Active()).*values, context, creature->GetMapId(), creature->GetLevel());
     }
@@ -84,14 +92,19 @@ namespace
         return DamageValue(target, attacker, &CreatureScaling::Settings::damage);
     }
 
-    // Weapon-based spells and bleeds grow with the creature's melee damage; other spells already carry their own
-    // per-level values (live creature spells hit for about their Spell.dbc value at the creature's own level).
+    // Weapon-based spells and bleeds grow with the creature's melee damage; in the open world other spells already
+    // carry their own per-level values (live creature spells hit for about their Spell.dbc value at the creature's own
+    // level).
     float SpellDamageMultiplier(Unit const* target, Unit const* attacker, SpellInfo const* spellInfo)
     {
-        if (spellInfo && (spellInfo->DmgClass == SPELL_DAMAGE_CLASS_MELEE ||
-            spellInfo->DmgClass == SPELL_DAMAGE_CLASS_RANGED))
-            return DamageMultiplier(target, attacker);
-        return DamageValue(target, attacker, &CreatureScaling::Settings::spellDamage);
+        CreatureScaling::Context context;
+        Creature const* creature = ScaledAttacker(target, attacker, context);
+        if (!creature)
+            return 1.0f;
+        bool const weaponSpell = spellInfo && (spellInfo->DmgClass == SPELL_DAMAGE_CLASS_MELEE ||
+            spellInfo->DmgClass == SPELL_DAMAGE_CLASS_RANGED);
+        return CreatureScaling::SpellMultiplier(*Active(), context, creature->GetMapId(), creature->GetLevel(),
+            weaponSpell);
     }
 
     template <typename T>
@@ -121,6 +134,15 @@ namespace
         result.raid = ReadFormula("CoA.CreatureScaling.Raid." + kind, defaults.raid);
         result.maps = CreatureScaling::ParseMapMultipliers(sConfigMgr->GetOption<std::string>(
             "CoA.CreatureScaling.Map" + kind, CreatureScaling::FormatMapMultipliers(defaults.maps), false));
+        return result;
+    }
+
+    CreatureScaling::SpellMultipliers ReadSpellMultipliers(CreatureScaling::SpellMultipliers const& defaults)
+    {
+        CreatureScaling::SpellMultipliers result;
+        result.world = ReadFormula("CoA.CreatureScaling.World.SpellDamage", defaults.world);
+        result.maps = CreatureScaling::ParseMapMultipliers(sConfigMgr->GetOption<std::string>(
+            "CoA.CreatureScaling.MapSpellDamage", CreatureScaling::FormatMapMultipliers(defaults.maps), false));
         return result;
     }
 }
@@ -165,7 +187,7 @@ public:
         settings->health = ReadMultipliers("Health", defaults.health);
         settings->damage = ReadMultipliers("Damage", defaults.damage);
         settings->damageSpread = ReadMultipliers("DamageSpread", defaults.damageSpread);
-        settings->spellDamage = ReadMultipliers("SpellDamage", defaults.spellDamage);
+        settings->spellDamage = ReadSpellMultipliers(defaults.spellDamage);
         std::lock_guard<std::mutex> lock(SettingsMutex);
         Configured = std::move(settings);
         Publish();
@@ -184,13 +206,12 @@ public:
         }
         auto settings = Active();
         LOG_INFO("server.loading",
-            ">> CoA creature scaling {}: health {}/{}/{}, damage {}/{}/{}, damage spread {}/{}/{}, spell damage {}/{}/{} "
-            "(world/dungeon/raid), {} map health overrides, {} flex health entries kept",
+            ">> CoA creature scaling {}: health {}/{}/{}, damage {}/{}/{}, damage spread {}/{}/{} (world/dungeon/raid), "
+            "world spell damage {}, {} map health overrides, {} flex health entries kept",
             settings->enabled ? "enabled" : "disabled", settings->health.world.Text(), settings->health.dungeon.Text(),
             settings->health.raid.Text(), settings->damage.world.Text(), settings->damage.dungeon.Text(),
             settings->damage.raid.Text(), settings->damageSpread.world.Text(), settings->damageSpread.dungeon.Text(),
-            settings->damageSpread.raid.Text(), settings->spellDamage.world.Text(),
-            settings->spellDamage.dungeon.Text(), settings->spellDamage.raid.Text(), settings->health.maps.size(),
+            settings->damageSpread.raid.Text(), settings->spellDamage.world.Text(), settings->health.maps.size(),
             FlexHealthEntries.size());
     }
 };

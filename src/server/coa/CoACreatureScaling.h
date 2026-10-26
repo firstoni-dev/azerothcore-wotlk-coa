@@ -8,7 +8,8 @@ class Unit;
 namespace CreatureScaling
 {
 float DamageMultiplier(Unit const* target, Unit const* attacker);
-// The multiplier applied to spell: melee and ranged spells take the melee damage factor, other spells SpellDamage.
+// The multiplier applied to spell: melee and ranged spells take the melee damage factor, other open-world spells
+// World.SpellDamage; in dungeons and raids spells keep the melee damage factor unless MapSpellDamage names the map.
 float SpellDamageMultiplier(Unit const* target, Unit const* attacker, SpellInfo const* spell);
 
 class TestOverride

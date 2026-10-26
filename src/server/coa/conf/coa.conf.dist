@@ -82,12 +82,11 @@ CoA.CreatureScaling.Dungeon.DamageSpread = 0
 CoA.CreatureScaling.Raid.DamageSpread = 0
 CoA.CreatureScaling.MapDamageSpread = ""
 # Spell and periodic damage from creatures. Damage above covers melee swings and melee/ranged spells (weapon strikes,
-# bleeds); every other spell takes SpellDamage instead. Live creature spells hit for about their spell data value at
-# the creature's own level in player combat logs (dungeons 10-44: median 0.85-1.13), so the default is unscaled.
+# bleeds); every other open-world spell takes World.SpellDamage instead. Live creature spells hit for about their
+# spell data value at the creature's own level in player combat logs, so the default is unscaled. Dungeons and raids
+# have no spell factor of their own: their spells keep Dungeon.Damage/Raid.Damage unless MapSpellDamage names the map.
 # Formulas and MapSpellDamage as above.
-CoA.CreatureScaling.World.SpellDamage = 1.0
-CoA.CreatureScaling.Dungeon.SpellDamage = 1.0
-CoA.CreatureScaling.Raid.SpellDamage = 1.0
+CoA.CreatureScaling.World.SpellDamage = 1
 CoA.CreatureScaling.MapSpellDamage = ""
 
 # Live-like magic resistance for NPCs not controlled by players, including Holy
