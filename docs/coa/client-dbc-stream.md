@@ -14,8 +14,8 @@ names right away, before the server answers the login, and a map its `Map.dbc` l
 A realm whose `SMSG_REALM_INFO` names a different realm data path (only Area 52 does) makes the client reload
 every DBC a few seconds later, which drops the streamed rows; they come back with the next character list.
 
-Code: `src/server/coa/AscensionClientDbcStream.{h,cpp}`, called from the login patch stream in
-`AscensionCompat.cpp`.
+Code: `src/server/coa/AscensionClientDbcStream.{h,cpp}`, called from the `CMSG_CHAR_ENUM` branch of
+`CanPacketReceiveEarly` in `AscensionCompat.cpp`.
 
 ## Client requirement
 
