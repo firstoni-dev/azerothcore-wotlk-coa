@@ -8,11 +8,14 @@
 #include <string>
 #include <vector>
 
-class Player;
+class WorldSession;
 
-// Rows of the world tables gameobjectdisplayinfo_dbc, map_dbc and mapdifficulty_dbc, streamed at login to
-// clients whose Extensions.dll is built with ASCENSION_DBC_STREAM. The same rows the server's own stores load,
-// so server and client agree on them. See docs/coa/client-dbc-stream.md.
+// Rows of the world tables gameobjectdisplayinfo_dbc, map_dbc and mapdifficulty_dbc, streamed to clients whose
+// Extensions.dll is built with ASCENSION_DBC_STREAM. They go out when CMSG_CHAR_ENUM arrives, ahead of the
+// character list: Enter World starts loading the map the list names before the server answers the login, so a
+// character standing on a map only these rows define would otherwise hit the client's "does not exist in
+// Map.dbc" assert. They are the rows
+// the server's own stores load, so server and client agree. See docs/coa/client-dbc-stream.md.
 constexpr uint16 AscensionClientDbcGameObjectDisplayInfoOpcode = 0x8F3;
 constexpr uint16 AscensionClientDbcMapOpcode = 0x8F4;
 constexpr uint16 AscensionClientDbcMapDifficultyOpcode = 0x8F5;
@@ -55,7 +58,10 @@ std::vector<AscensionClientDbcTable> const& GetAscensionClientDbcTables();
 std::vector<WorldPacket> BuildAscensionClientDbcPackets(AscensionClientDbcTable const& table,
     std::vector<AscensionClientDbcRow> const& rows, LocaleConstant locale);
 
-// Sends every table's rows (loaded from the world database on first use); returns the bytes sent.
-std::size_t SendAscensionClientDbcStream(Player* player, uint32& rowsSent);
+// Loads the rows from the world database (worldserver startup; a send before it loads them itself).
+void LoadAscensionClientDbcStream();
+
+// Sends every table's rows. Called from the network thread.
+void SendAscensionClientDbcStream(WorldSession* session);
 
 #endif

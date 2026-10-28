@@ -1,8 +1,9 @@
 /* Copyright (C) 2016+ AzerothCore, GNU AGPL v3. */
 #include "AscensionClientDbcStream.h"
 #include "DatabaseEnv.h"
+#include "Field.h"
 #include "Log.h"
-#include "Player.h"
+#include "QueryResult.h"
 #include "WorldSession.h"
 #include <algorithm>
 #include <bit>
@@ -110,6 +111,11 @@ namespace
     }
 }
 
+void LoadAscensionClientDbcStream()
+{
+    GetRows();
+}
+
 std::vector<AscensionClientDbcTable> const& GetAscensionClientDbcTables()
 {
     return Tables;
@@ -166,20 +172,22 @@ std::vector<WorldPacket> BuildAscensionClientDbcPackets(AscensionClientDbcTable 
     return packets;
 }
 
-std::size_t SendAscensionClientDbcStream(Player* player, uint32& rowsSent)
+void SendAscensionClientDbcStream(WorldSession* session)
 {
     std::vector<std::vector<AscensionClientDbcRow>> const& rows = GetRows();
-    LocaleConstant const locale = player->GetSession()->GetSessionDbcLocale();
+    LocaleConstant const locale = session->GetSessionDbcLocale();
     std::size_t bytes = 0;
-    rowsSent = 0;
+    uint32 rowsSent = 0;
     for (std::size_t table = 0; table < Tables.size(); ++table)
     {
         for (WorldPacket const& packet : BuildAscensionClientDbcPackets(Tables[table], rows[table], locale))
         {
-            player->GetSession()->SendPacket(&packet);
+            session->SendPacket(&packet);
             bytes += packet.size();
         }
         rowsSent += uint32(rows[table].size());
     }
-    return bytes;
+    if (rowsSent)
+        LOG_DEBUG("coa", "Streamed {} client DBC rows ({} bytes) to account {} before world login",
+            rowsSent, bytes, session->GetAccountId());
 }

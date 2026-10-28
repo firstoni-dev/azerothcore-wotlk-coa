@@ -4212,17 +4212,14 @@ public:
     for (VanityCollectionPatchRow const& row : rows.VanityCollections)
       bytes += SendVanityCollectionRow(player, row);
 
-    uint32 dbcStreamRows = 0;
-    bytes += SendAscensionClientDbcStream(player, dbcStreamRows);
-
     LOG_INFO("coa",
              "Streamed {} CreatureModelData, {} CreatureDisplayInfo, {} ItemDisplayInfo, {} of {} Item, "
-             "{} Spell, {} SuperTrack, {} QuestSuperTrack, {} SkillLineAbility, {} SpellShapeshiftForm, "
-             "{} VanityCollection and {} streamed DBC patch rows ({} bytes) to {} in {} ms",
+             "{} Spell, {} SuperTrack, {} QuestSuperTrack, {} SkillLineAbility, {} SpellShapeshiftForm and "
+             "{} VanityCollection patch rows ({} bytes) to {} in {} ms",
              rows.CreatureModels.size(), sent, rows.ItemDisplayInfos.size(), sentItems.Rows,
              rows.Items.size(), sentSpells, rows.SuperTracks.size(), rows.QuestSuperTracks.size(),
-             rows.SkillLineAbilities.size(), rows.ShapeshiftForms.size(), rows.VanityCollections.size(),
-             dbcStreamRows, bytes, player->GetName(), GetMSTimeDiffToNow(startTime));
+             rows.SkillLineAbilities.size(), rows.ShapeshiftForms.size(), rows.VanityCollections.size(), bytes,
+             player->GetName(), GetMSTimeDiffToNow(startTime));
 
     if (!rows.ShapeshiftForms.empty() && player->GetShapeshiftForm() != FORM_NONE)
       player->ForceValuesUpdateAtIndex(UNIT_FIELD_BYTES_2);
@@ -8349,6 +8346,10 @@ public:
       AscensionCollectionService& service = AscensionCollectionService::Instance();
       service.SendRealmInfo(session);
       service.SendSecureAddonList(session);
+      // Ahead of the character list: Enter World loads the map it names (AscensionClientDbcStream.h).
+      if (session && !session->IsBot() &&
+          ascensionCompatConfig.GetConfigValue<bool>(AscensionCompatConfig::SEND_DISPLAY_PATCHES))
+        SendAscensionClientDbcStream(session);
     }
 
     uint32 firstOpcode = ascensionCompatConfig.GetConfigValue<uint32>(
@@ -9639,6 +9640,7 @@ public:
     bool dataLoaded =
         AscensionCollectionService::Instance().LoadClientData();
     AscensionDisplayPatchService::Instance().Initialize();
+    LoadAscensionClientDbcStream();
     AscensionResourceService::Instance().ValidateDefinitions();
     LOG_INFO("coa",
              "Ascension compatibility enabled; consuming extension opcodes "

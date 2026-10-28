@@ -3,7 +3,16 @@
 The world tables `gameobjectdisplayinfo_dbc`, `map_dbc` and `mapdifficulty_dbc` already add rows to (or
 replace rows in) the server's own `GameObjectDisplayInfo.dbc`, `Map.dbc` and `MapDifficulty.dbc`. With the
 display-patch stream on (`CoA.SendDisplayPatches`), the same rows are now also sent to each player
-at login. Server and client read them from one place.
+when the client asks for the character list (`CMSG_CHAR_ENUM`), ahead of the list itself. Server and client
+read them from one place.
+
+They must arrive before the player presses Enter World: the client starts loading the map the character list
+names right away, before the server answers the login, and a map its `Map.dbc` lacks is a fatal
+"MapID = N does not exist in Map.dbc" assert. Sending them later (with the login patch stream, or on
+`CMSG_PLAYER_LOGIN`) crashed a character logging in on a streamed map.
+
+A realm whose `SMSG_REALM_INFO` names a different realm data path (only Area 52 does) makes the client reload
+every DBC a few seconds later, which drops the streamed rows; they come back with the next character list.
 
 Code: `src/server/coa/AscensionClientDbcStream.{h,cpp}`, called from the login patch stream in
 `AscensionCompat.cpp`.
@@ -33,6 +42,5 @@ or 16 KB. The client grows each table's index once per batch, so streams of many
   the client cannot load.
 - **Objects already spawned keep their display.** A changed `gameobjectdisplayinfo_dbc` row applies to
   objects the client creates after the stream, for example on leaving and re-entering view.
-- **The map being loaded at login** has already read its Map row; a change applies at the next load.
-- Rows are loaded once, on the first login after the server starts. Restart the worldserver after editing
+- Rows are loaded once, at worldserver startup. Restart the worldserver after editing
   the tables; the server's own stores also read them only at startup.
