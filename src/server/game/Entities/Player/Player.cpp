@@ -1776,7 +1776,9 @@ void Player::ProcessDelayedOperations()
             {
                 RemoveAurasByType(SPELL_AURA_MOD_SHAPESHIFT);
             }
-            AddAura(m_entryPointData.mountSpell, this);
+            // cast, not AddAura: the spell's own target handling decides which of its effects apply here,
+            // so a flying mount restored outside a flying area stays a ground mount
+            CastSpell(this, m_entryPointData.mountSpell, true);
             m_entryPointData.mountSpell = 0;
         }
     }
@@ -2709,7 +2711,9 @@ void Player::GiveLevel(uint8 level)
     UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_REACH_LEVEL);
 
     // Refer-A-Friend
-    if ((GetSession()->GetRecruiterId() || GetSession()->IsARecruiter()) && level > oldLevel)
+    PlayerSettingVector const* prestige = FindPlayerSettings("core.coa_prestige");
+    bool const prestigeCycle = prestige && prestige->size() > 1 && (*prestige)[1].value != 0;
+    if (!prestigeCycle && (GetSession()->GetRecruiterId() || GetSession()->IsARecruiter()) && level > oldLevel)
     {
         uint32 const cap = sWorld->getIntConfig(CONFIG_MAX_RECRUIT_A_FRIEND_BONUS_PLAYER_LEVEL);
         uint32 const earned = std::min<uint32>(level, cap) / 2 - std::min<uint32>(oldLevel, cap) / 2;
@@ -3566,7 +3570,7 @@ void Player::_learnSpell(uint32 spellId, bool temporary, bool learnFromSkill, bo
                 return;
 
     // Xinef: don't allow to learn active spell once more
-    if (HasActiveSpell(spellId))
+    if (HasStoredActiveSpell(spellId))
     {
         LOG_DEBUG("entities.player", "Player ({}) tries to learn already active spell: {}", GetGUID().ToString(), spellId);
         return;
@@ -4297,16 +4301,55 @@ bool Player::HasSpell(uint32 spell) const
     return (itr != m_spells.end() && itr->second->State != PLAYERSPELL_REMOVED && itr->second->IsInSpec(m_activeSpec));
 }
 
+bool Player::HasSpellOrTwin(uint32 spell) const
+{
+    for (uint32 relative : sSpellMgr->GetSpellAndRelatives(spell))
+        if (HasSpell(relative))
+            return true;
+    return false;
+}
+
 bool Player::HasTalent(uint32 spell, uint8 spec) const
 {
     PlayerTalentMap::const_iterator itr = m_talents.find(spell);
     return (itr != m_talents.end() && itr->second->State != PLAYERSPELL_REMOVED && itr->second->IsInSpec(spec));
 }
 
+bool Player::HasStoredActiveSpell(uint32 spell) const
+{
+    auto const itr = m_spells.find(spell);
+    return itr != m_spells.end() && itr->second->State != PLAYERSPELL_REMOVED &&
+        itr->second->Active && itr->second->IsInSpec(m_activeSpec);
+}
+
 bool Player::HasActiveSpell(uint32 spell) const
 {
-    PlayerSpellMap::const_iterator itr = m_spells.find(spell);
-    return (itr != m_spells.end() && itr->second->State != PLAYERSPELL_REMOVED && itr->second->Active && itr->second->IsInSpec(m_activeSpec));
+    if (HasStoredActiveSpell(spell))
+        return true;
+    SpellInfo const* requested = sSpellMgr->GetSpellInfo(spell);
+    if (!requested || requested->IsPassive() || requested->SpellLevel > GetLevel())
+        return false;
+    for (AuraEffect const* effect : GetAuraEffectsByType(SPELL_AURA_ASCENSION_OVERRIDE_SPELL))
+    {
+        SpellEffectInfo const& data = effect->GetSpellInfo()->Effects[effect->GetEffIndex()];
+        if (data.MiscValue <= 0 || data.MiscValueB || data.DieSides || effect->GetAmount() <= 0)
+            continue;
+        SpellInfo const* original = sSpellMgr->GetSpellInfo(uint32(data.MiscValue));
+        SpellInfo const* replacement = sSpellMgr->GetSpellInfo(uint32(effect->GetAmount()));
+        if (!original || !replacement ||
+            replacement->GetFirstRankSpell() != requested->GetFirstRankSpell())
+            continue;
+        if (original != original->GetFirstRankSpell() || replacement != replacement->GetFirstRankSpell())
+        {
+            if (replacement->Id == spell && HasStoredActiveSpell(original->Id))
+                return true;
+            continue;
+        }
+        for (SpellInfo const* rank = original; rank; rank = rank->GetNextRankSpell())
+            if (HasStoredActiveSpell(rank->Id) && requested->GetRank() <= rank->GetRank())
+                return true;
+    }
+    return false;
 }
 
 /**
