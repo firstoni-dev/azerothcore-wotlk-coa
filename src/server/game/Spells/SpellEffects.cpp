@@ -21,6 +21,7 @@
 #include "BattlegroundSA.h"
 #include "CellImpl.h"
 #include "Containers.h"
+#include "Corpse.h"
 #include <array>
 #include "Chat.h"
 #include "Common.h"
@@ -986,7 +987,7 @@ void Spell::EffectAscensionResetCooldown(SpellEffIndex effIndex)
     Unit* target = unitTarget ? unitTarget : m_caster;
     Player* player = target ? target->ToPlayer() : nullptr;
     SpellEffectInfo const& effect = m_spellInfo->Effects[effIndex];
-    ResetAscensionCooldown(player, effect.MiscValue, effect.MiscValueB != 0);
+    ModifyAscensionCooldown(player, effect.MiscValue, 0, effect.MiscValueB != 0);
 }
 
 // Effect 197: the 165 cooldown change applied to every cooling spell of the caster's family that the effect's class
@@ -1045,7 +1046,13 @@ void Spell::EffectResurrectNew(SpellEffIndex effIndex)
     uint32 health = damage;
     uint32 mana = m_spellInfo->Effects[effIndex].MiscValue;
     ExecuteLogEffectResurrect(effIndex, target);
-    target->setResurrectRequestData(m_caster->GetGUID(), m_caster->GetMapId(), m_caster->GetPositionX(), m_caster->GetPositionY(), m_caster->GetPositionZ(), health, mana);
+    bool const playerCaster = m_caster->IsPlayer();
+    Corpse* corpse = playerCaster ? target->GetCorpse() : nullptr;
+    uint32 const mapId = corpse ? corpse->GetMapId() : (playerCaster ? target->GetMapId() : m_caster->GetMapId());
+    float const x = corpse ? corpse->GetPositionX() : (playerCaster ? target->GetPositionX() : m_caster->GetPositionX());
+    float const y = corpse ? corpse->GetPositionY() : (playerCaster ? target->GetPositionY() : m_caster->GetPositionY());
+    float const z = corpse ? corpse->GetPositionZ() : (playerCaster ? target->GetPositionZ() : m_caster->GetPositionZ());
+    target->setResurrectRequestData(m_caster->GetGUID(), mapId, x, y, z, health, mana);
     SendResurrectRequest(target);
 }
 
@@ -5599,7 +5606,13 @@ void Spell::EffectResurrect(SpellEffIndex effIndex)
 
     ExecuteLogEffectResurrect(effIndex, target);
 
-    target->setResurrectRequestData(m_caster->GetGUID(), m_caster->GetMapId(), m_caster->GetPositionX(), m_caster->GetPositionY(), m_caster->GetPositionZ(), health, mana);
+    bool const playerCaster = m_caster->IsPlayer();
+    Corpse* corpse = playerCaster ? target->GetCorpse() : nullptr;
+    uint32 const mapId = corpse ? corpse->GetMapId() : (playerCaster ? target->GetMapId() : m_caster->GetMapId());
+    float const x = corpse ? corpse->GetPositionX() : (playerCaster ? target->GetPositionX() : m_caster->GetPositionX());
+    float const y = corpse ? corpse->GetPositionY() : (playerCaster ? target->GetPositionY() : m_caster->GetPositionY());
+    float const z = corpse ? corpse->GetPositionZ() : (playerCaster ? target->GetPositionZ() : m_caster->GetPositionZ());
+    target->setResurrectRequestData(m_caster->GetGUID(), mapId, x, y, z, health, mana);
     SendResurrectRequest(target);
 }
 

@@ -1116,7 +1116,9 @@ void ObserveExtensionPacket(Actor& actor, WorldPacket const& packet)
         packet.GetOpcode() != SMSG_DUEL_REQUESTED && packet.GetOpcode() != SMSG_DUEL_COUNTDOWN &&
         packet.GetOpcode() != SMSG_DUEL_COMPLETE && packet.GetOpcode() != SMSG_FRIEND_STATUS &&
         packet.GetOpcode() != SMSG_SEND_MAIL_RESULT && packet.GetOpcode() != SMSG_GOSSIP_MESSAGE &&
-        packet.GetOpcode() != SMSG_BINDPOINTUPDATE && packet.GetOpcode() != SMSG_PET_SPELLS &&
+        packet.GetOpcode() != SMSG_BINDPOINTUPDATE &&         packet.GetOpcode() != SMSG_PET_SPELLS &&
+        packet.GetOpcode() != SMSG_RESURRECT_REQUEST &&
+        packet.GetOpcode() != SMSG_CORPSE_RECLAIM_DELAY &&
         packet.GetOpcode() != SMSG_TRADE_STATUS)
         return;
 
@@ -3057,6 +3059,16 @@ private:
             Require(unit->IsPlayer(), "LFG state needs a player");
             return double(sLFGMgr->GetState(unit->GetGUID()));
         }
+        if (metric == "lfg_selected_dungeon_count")
+        {
+            Require(unit->IsPlayer(), "LFG selected dungeons need a player");
+            return double(sLFGMgr->GetSelectedDungeons(unit->GetGUID()).size());
+        }
+        if (metric == "lfg_selected_dungeon")
+        {
+            Require(unit->IsPlayer(), "LFG selected dungeons need a player");
+            return sLFGMgr->GetSelectedDungeons(unit->GetGUID()).contains(step.get<uint32>("dungeon")) ? 1 : 0;
+        }
         if (metric == "lfg_need_allowed")
         {
             Player* player = unit->ToPlayer();
@@ -4116,6 +4128,12 @@ private:
         {
             Unit* attacker = GetUnit(step.get<std::string>("target"));
             SpellInfo const* info = sSpellMgr->GetSpellInfo(spell);
+            Unit* victim = player;
+            if (auto entry = step.get_optional<uint32>("entry"))
+            {
+                victim = GetOwnedCreature(player, *entry);
+                Require(victim != nullptr, "Scripted damage observation needs a present owned creature");
+            }
             if (metric == "script_melee_damage_dealt")
             {
                 uint32 damage = 1000;
@@ -4125,17 +4143,17 @@ private:
             if (metric == "script_melee_damage_taken")
             {
                 uint32 damage = 1000;
-                sScriptMgr->ModifyMeleeDamage(player, attacker, damage);
+                sScriptMgr->ModifyMeleeDamage(victim, attacker, damage);
                 float minDamage = float(damage);
                 float maxDamage = float(damage);
-                sScriptMgr->ModifyMeleeDamageRange(player, attacker, minDamage, maxDamage);
+                sScriptMgr->ModifyMeleeDamageRange(victim, attacker, minDamage, maxDamage);
                 return (minDamage + maxDamage) / 2.0f;
             }
             Require(info != nullptr, "Unknown spell for scripted damage taken");
             if (metric == "script_spell_damage_taken")
             {
                 int32 damage = 1000;
-                sScriptMgr->ModifySpellDamageTaken(player, attacker, damage, info);
+                sScriptMgr->ModifySpellDamageTaken(victim, attacker, damage, info);
                 return damage;
             }
             if (metric == "script_heal_received")
@@ -4146,7 +4164,7 @@ private:
             }
             Require(metric == "script_periodic_damage_taken", "Unknown scripted damage metric");
             uint32 damage = 1000;
-            sScriptMgr->ModifyPeriodicDamageAurasTick(player, attacker, damage, info);
+            sScriptMgr->ModifyPeriodicDamageAurasTick(victim, attacker, damage, info);
             return damage;
         }
         if (metric == "spell_done_crit_chance" || metric == "spell_taken_crit_chance" ||
@@ -5845,6 +5863,12 @@ private:
                 player->AddUnitMovementFlag(movementFlag);
             else
                 player->RemoveUnitMovementFlag(movementFlag);
+        }
+        else if (action == "relocate")
+        {
+            player->UpdatePosition(player->GetPositionX() + step.get<float>("dx", 0.0f),
+                player->GetPositionY() + step.get<float>("dy", 0.0f),
+                player->GetPositionZ() + step.get<float>("dz", 0.0f), player->GetOrientation());
         }
         else if (action == "stop_attack")
         {

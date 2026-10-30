@@ -56,7 +56,7 @@ METRICS = TIMELINE_METRICS | {
     'melee_damage_count', 'melee_damage_total',
     'pet_power', 'pet_max_power', 'spell_energize_count', 'spell_energize_total',
     'xp', 'next_level_xp', 'skill_value', 'skill_maximum', 'lfg_dungeon_disabled', 'lfg_lock_status', 'lfg_state',
-    'lfg_need_allowed',
+    'lfg_selected_dungeon_count', 'lfg_selected_dungeon', 'lfg_need_allowed',
     'map_id', 'instance_id',
     'in_arena', 'arena_team_members', 'arena_team_season_games', 'arena_team_season_wins',
     'battleground_team', 'team', 'name_query_race',
@@ -198,6 +198,7 @@ METRIC_FIELDS = {'actor', 'metric', 'spell', 'power', 'caster', 'effect', 'item'
 ACTIONS = {
     'stop_attack': ({'actor'}, {'actor'}),
     'set_moving': ({'actor', 'enabled'}, {'actor', 'enabled', 'flag'}),
+    'relocate': ({'actor'}, {'actor', 'dx', 'dy', 'dz'}),
     'level_scaling_packet': ({'actor', 'value'}, {'actor', 'value'}),
     'client_packet': ({'actor', 'opcode'},
                       {'actor', 'opcode', 'fields', 'consumed', 'early', 'cast_before', 'pet_loading_before'}),
@@ -613,6 +614,9 @@ def validate(scenario):
         if action == 'set_moving' and 'flag' in step:
             require(step['flag'] in {'forward', 'backward', 'strafe_left', 'strafe_right', 'falling'},
                 f'{where}: flag must be forward, backward, strafe_left, strafe_right or falling')
+        if action == 'relocate':
+            for key in ('dx', 'dy', 'dz'):
+                number(step.get(key, 0), f'{where}.{key}', -20, 20)
         if 'all_specs' in step:
             require(type(step['all_specs']) is bool, f'{where}: all_specs must be boolean')
         if action == 'talent' and 'command' in step:
@@ -883,6 +887,10 @@ def validate(scenario):
                         f'{where}: creature level bounds are reversed')
             if metric == 'lfg_state':
                 require(step['actor'] in player_ids, f'{where}: LFG state metric needs a player')
+            if metric in {'lfg_selected_dungeon_count', 'lfg_selected_dungeon'}:
+                require(step['actor'] in player_ids, f'{where}: LFG selected dungeon metric needs a player')
+            if metric == 'lfg_selected_dungeon':
+                number(step.get('dungeon'), f'{where}.dungeon', 1, 2**24 - 1, True)
             if metric == 'lfg_need_allowed':
                 require(step['actor'] in player_ids, f'{where}: LFG Need metric needs a player')
                 number(step.get('item'), f'{where}.item', 1, 2**32 - 1, True)
