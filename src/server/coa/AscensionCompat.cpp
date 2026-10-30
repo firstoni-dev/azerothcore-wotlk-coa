@@ -196,6 +196,11 @@ constexpr uint16 SMSG_PATCH_ITEM = 0x0932;
 constexpr uint16 SMSG_PATCH_ITEM_DISPLAY_INFO = 0x096B;
 constexpr uint16 SMSG_PATCH_CHARACTER_ADVANCEMENT = 0x064A;
 constexpr uint16 SMSG_PATCH_SPELL = 0x092A;
+constexpr uint16 SMSG_PATCH_SPELL_VISUAL = 0x092C;
+constexpr uint16 SMSG_PATCH_SPELL_VISUAL_KIT = 0x092D;
+constexpr uint16 SMSG_PATCH_SPELL_VISUAL_KIT_MODEL_ATTACH = 0x092E;
+constexpr uint16 SMSG_PATCH_SPELL_VISUAL_EFFECT_NAME = 0x092F;
+constexpr uint16 SMSG_PATCH_SOUND_ENTRIES = 0x098B;
 constexpr uint16 SMSG_PATCH_SUPER_TRACK = 0x06BE;
 constexpr uint16 SMSG_PATCH_QUEST_SUPER_TRACK = 0x06BF;
 constexpr uint16 SMSG_PATCH_SKILL_LINE_ABILITY = 0x0934;
@@ -1585,6 +1590,17 @@ public:
     return itr != entries.end() && itr->EntryId == entryId ? &*itr : nullptr;
   }
 
+  static std::vector<AscensionCoATalentState::KnownEntry> EntriesOfSpecialization(
+      std::vector<AscensionCoATalentState::KnownEntry> known, uint32 specializationId)
+  {
+    std::erase_if(known, [specializationId](AscensionCoATalentState::KnownEntry const& item)
+    {
+      AscensionCompatData::CoATalentEntry const* entry = FindTalentEntry(item.EntryId);
+      return entry && entry->SpecId && entry->SpecId != specializationId;
+    });
+    return known;
+  }
+
   static AscensionCoATalentState::HasSpell SpellbookOf(Player const* player)
   {
     return [player](uint32 spellId) { return player->HasSpell(spellId); };
@@ -1908,7 +1924,7 @@ public:
 
       bool const classTree = entry.SpecId == 0;
       AscensionCoATalentState::SpentPoints const spent =
-          AscensionCoATalentState::Spent(KnownTalentEntries(player));
+          AscensionCoATalentState::Spent(EntriesOfSpecialization(KnownTalentEntries(player), activeSpecialization));
       uint32 const used = classTree ? spent.AE : spent.TE;
       uint32 const budget = classTree ? classBudget : specializationBudget;
       uint32 const cost = (rank - currentRank) * uint32(classTree ? entry.AECost : entry.TECost);
@@ -2123,7 +2139,8 @@ public:
     std::vector<AscensionCoATalentState::KnownEntry> priced;
     for (AscensionCompatData::CoATalentEntry const& entry : AscensionCompatData::CoATalentEntries)
     {
-      if (entry.ClassId != player->getClass() || (!entry.AECost && !entry.TECost))
+      if (entry.ClassId != player->getClass() || (!entry.AECost && !entry.TECost) ||
+          (entry.SpecId && entry.SpecId != targetSpec))
         continue;
       auto itr = wanted.find(entry.EntryId);
       uint32 const rank = std::max(itr == wanted.end() ? 0 : itr->second, PersistentRank(player, entry));
@@ -4228,6 +4245,9 @@ public:
     for (QuestSuperTrackPatch const &patch : rows.QuestSuperTracks)
       bytes += SendQuestSuperTrackRow(player, QuestSuperTrackRowFor(patch, player->getRaceMask()));
 
+    bytes += SendSpellVisualRows(player);
+    bytes += SendSoundEntryRows(player);
+
     for (SkillLineAbilityPatchRow const& row : rows.SkillLineAbilities)
         bytes += SendSkillLineAbilityRow(player, row);
 
@@ -4782,6 +4802,120 @@ private:
     return SendRowPacket(player, packet);
   }
 
+  std::size_t SendSpellVisualRow(Player *player, uint16 opcode,
+                                 std::vector<uint32> const &values) const {
+    WorldPacket packet(opcode, values.size() * sizeof(uint32));
+    for (uint32 value : values)
+      packet << value;
+    return SendRowPacket(player, packet);
+  }
+
+  std::size_t SendSpellVisualRows(Player *player) const {
+    std::size_t bytes = 0;
+    uint32 visuals = 0, kits = 0, attaches = 0, effects = 0;
+
+    if (QueryResult result = WorldDatabase.Query(
+            "SELECT `ID`, `PrecastKit`, `CastKit`, `ImpactKit`, `StateKit`, `StateDoneKit`, `ChannelKit`, "
+            "`HasMissile`, `MissileModel`, `MissilePathType`, `MissileDestinationAttachment`, `MissileSound`, "
+            "`AnimEventSoundID`, `Flags`, `CasterImpactKit`, `TargetImpactKit`, `MissileAttachment`, "
+            "`MissileFollowGroundHeight`, `MissileFollowGroundDropSpeed`, `MissileFollowGroundApproach`, "
+            "`MissileFollowGroundFlags`, `MissileMotion`, `MissileTargetingKit`, `InstantAreaKit`, "
+            "`ImpactAreaKit`, `PersistentAreaKit`, `MissileCastOffsetX`, `MissileCastOffsetY`, "
+            "`MissileCastOffsetZ`, `MissileImpactOffsetX`, `MissileImpactOffsetY`, `MissileImpactOffsetZ` "
+            "FROM `spellvisual_dbc`"))
+    {
+      do {
+        Field *fields = result->Fetch();
+        std::vector<uint32> values(32);
+        for (uint32 i = 0; i < 26; ++i)
+          values[i] = fields[i].Get<uint32>();
+        for (uint32 i = 26; i < 32; ++i)
+          values[i] = std::bit_cast<uint32>(fields[i].Get<float>());
+        bytes += SendSpellVisualRow(player, SMSG_PATCH_SPELL_VISUAL, values);
+        ++visuals;
+      } while (result->NextRow());
+    }
+
+    if (QueryResult result = WorldDatabase.Query("SELECT * FROM `spellvisualkit_dbc`"))
+    {
+      do {
+        Field *fields = result->Fetch();
+        std::vector<uint32> values(38);
+        for (uint32 i = 0; i < 38; ++i)
+          values[i] = fields[i].Get<uint32>();
+        bytes += SendSpellVisualRow(player, SMSG_PATCH_SPELL_VISUAL_KIT, values);
+        ++kits;
+      } while (result->NextRow());
+    }
+
+    if (QueryResult result = WorldDatabase.Query(
+            "SELECT `ID`, `ParentSpellVisualKitID`, `SpellVisualEffectNameID`, `AttachmentID`, `OffsetX`, "
+            "`OffsetY`, `OffsetZ`, `Yaw`, `Pitch`, `Roll` FROM `spellvisualkitmodelattach_dbc`"))
+    {
+      do {
+        Field *fields = result->Fetch();
+        std::vector<uint32> values(10);
+        for (uint32 i = 0; i < 4; ++i)
+          values[i] = fields[i].Get<uint32>();
+        for (uint32 i = 4; i < 10; ++i)
+          values[i] = std::bit_cast<uint32>(fields[i].Get<float>());
+        bytes += SendSpellVisualRow(player, SMSG_PATCH_SPELL_VISUAL_KIT_MODEL_ATTACH, values);
+        ++attaches;
+      } while (result->NextRow());
+    }
+
+    if (QueryResult result = WorldDatabase.Query(
+            "SELECT `ID`, `Name`, `FilePath`, `Scale`, `Scale2`, `MinScale`, `MaxScale` "
+            "FROM `spellvisualeffectname_dbc`"))
+    {
+      do {
+        Field *fields = result->Fetch();
+        WorldPacket packet(SMSG_PATCH_SPELL_VISUAL_EFFECT_NAME, 28 + 64);
+        packet << uint32(fields[0].Get<uint32>());
+        AppendSizedString(packet, fields[1].Get<std::string>());
+        AppendSizedString(packet, fields[2].Get<std::string>());
+        for (uint32 i = 3; i < 7; ++i)
+          packet << fields[i].Get<float>();
+        bytes += SendRowPacket(player, packet);
+        ++effects;
+      } while (result->NextRow());
+    }
+
+    LOG_INFO("coa", "Streamed {} SpellVisual, {} SpellVisualKit, {} attach and {} effect rows to {}",
+             visuals, kits, attaches, effects, player->GetName());
+
+    return bytes;
+  }
+
+  std::size_t SendSoundEntryRows(Player *player) const {
+    constexpr uint32 SOUND_ID = 10045;
+
+    std::vector<uint32> values(30, 0);
+    values[0] = SOUND_ID;
+    values[1] = 1;
+    for (uint32 i = 13; i <= 22; ++i)
+      values[i] = 1;
+    values[24] = 1061997773;
+    values[26] = 1090519040;
+    values[27] = 1110704128;
+
+    std::vector<std::string> strings;
+    strings.emplace_back("FX_SHA_Whirlwind_Channel_02");
+    strings.emplace_back("fx_sha_whirlwind_channel_02.ogg");
+    strings.resize(11);
+    strings.emplace_back("Sound\\Spells");
+
+    WorldPacket packet(SMSG_PATCH_SOUND_ENTRIES, values.size() * sizeof(uint32) + 512);
+    for (uint32 value : values)
+      packet << value;
+    for (std::string const &text : strings)
+      AppendSizedString(packet, text);
+
+    LOG_INFO("coa", "Streamed custom tornado SoundEntries row {} ({} bytes) to {}", SOUND_ID, packet.size(),
+             player->GetName());
+    return SendRowPacket(player, packet);
+  }
+
   std::size_t SendSpellRow(Player *player, SpellPatchRow const &row) const {
     WorldPacket packet(SMSG_PATCH_SPELL,
                        row.Values.size() * sizeof(uint32) + 1024);
@@ -5240,7 +5374,7 @@ private:
     if (!info)
       return;
 
-    if (info->Id == AscensionSunCleric::DawnCast || info->Id == AscensionXoroth::SPELL_SACRIFICIAL_CIRCLE)
+    if (info->Id == AscensionXoroth::SPELL_SACRIFICIAL_CIRCLE)
     {
       row.Values[SPELL_WIRE_SLOT(SPELL_CASTER_AURA_SPELL_FIELD)] = info->CasterAuraSpell;
       row.Values[SPELL_WIRE_SLOT(SPELL_EXCLUDE_CASTER_AURA_SPELL_FIELD)] = info->ExcludeCasterAuraSpell;

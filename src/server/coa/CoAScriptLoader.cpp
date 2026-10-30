@@ -41,6 +41,7 @@ void AddSC_AscensionItemPower();
 void AddSC_AscensionMountSpeed();
 void AddSC_AscensionGlory();
 void AddSC_AscensionDifficultyRelease();
+void AddSC_AscensionRunSpeed();
 void AddSC_AscensionLfgRandomDungeonRequirements();
 void AddSC_AscensionQuestLog();
 void AddSC_AscensionRestingBuff();
@@ -796,6 +797,7 @@ void AddCoAScripts()
     AddSC_AscensionMountSpeed();
     AddSC_AscensionGlory();
     AddSC_AscensionDifficultyRelease();
+    AddSC_AscensionRunSpeed();
     AddSC_AscensionLfgRandomDungeonRequirements();
     AddSC_AscensionQuestLog();
     AddSC_AscensionRestingBuff();

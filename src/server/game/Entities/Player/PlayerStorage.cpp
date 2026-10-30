@@ -20,6 +20,7 @@
 #include "AchievementMgr.h"
 #include "ArenaTeam.h"
 #include "ArenaTeamMgr.h"
+#include "AscensionBazaarTokenReserve.h"
 #include "Battlefield.h"
 #include "Battleground.h"
 #include "BattlegroundMgr.h"
@@ -3167,6 +3168,7 @@ void Player::DestroyItem(uint8 bag, uint8 slot, bool update)
     if (pItem)
     {
         LOG_DEBUG("entities.player.items", "STORAGE: DestroyItem bag = {}, slot = {}, item = {}", bag, slot, pItem->GetEntry());
+        AscensionBazaarTokenReserve::SpendScope spendScope(this, pItem->GetEntry());
         // Also remove all contained items if the item is a bag.
         // This if () prevents item saving crashes if the condition for a bag to be empty before being destroyed was bypassed somehow.
         if (pItem->IsNotEmptyBag())
@@ -3257,6 +3259,7 @@ void Player::DestroyItem(uint8 bag, uint8 slot, bool update)
 void Player::DestroyItemCount(uint32 itemEntry, uint32 count, bool update, bool unequip_check)
 {
     LOG_DEBUG("entities.player.items", "STORAGE: DestroyItemCount item = {}, count = {}", itemEntry, count);
+    AscensionBazaarTokenReserve::SpendScope spendScope(this, itemEntry);
     uint32 remcount = 0;
 
     // in inventory
@@ -3536,6 +3539,7 @@ void Player::DestroyItemCount(Item* pItem, uint32& count, bool update)
         return;
 
     LOG_DEBUG("entities.player.items", "STORAGE: DestroyItemCount item ({}, Entry: {}) count = {}", pItem->GetGUID().ToString(), pItem->GetEntry(), count);
+    AscensionBazaarTokenReserve::SpendScope spendScope(this, pItem->GetEntry());
 
     if (pItem->GetCount() <= count)
     {

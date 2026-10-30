@@ -399,7 +399,8 @@ Arm of Thorim rolls 133–144 base damage at the fixture level, so two independe
 of 1.10–1.31 with its 20% bonus and 0.91–1.09 without it (including integer rounding). Charged Conduit
 preserves Static and must leave the talent without a depletion bonus.
 
-Players require `id`, numeric `race` and `class`; `level` defaults to 80. Optional `bot` logs the actor in on a
+Players require `id`, numeric `race` and `class`; `level` defaults to 80. Optional `gender` (0 male, 1 female,
+default 0) is sent in the character creation packet. Optional `bot` logs the actor in on a
 session flagged as a bot, the way playerbots flags the sessions it creates, so a scenario can check what the
 server does differently for them. Optional `security` (0..3, default 0/`SEC_PLAYER`) raises that one fixture
 session's account security, so a `command` step can reach a GM-gated chat command (for example an authoring
@@ -488,7 +489,7 @@ assert stable maximums and final levels when testing damage coefficients.
 | `attack` | `actor`, `target`: native melee attack request; optional `pet: true` sends the pet's attack command. Verify combat or damage with assertions. |
 | `stop_attack` | Player `actor`: native melee stop request. |
 | `pvp` | Player `actor`, boolean `enabled`: native PvP toggle request. Disabling retains the ordinary flag-removal timer. |
-| `set_moving` | Player `actor`, boolean `enabled`: fixture the native forward movement flag for cast restriction tests. |
+| `set_moving` | Player `actor`, boolean `enabled`: fixture the native forward movement flag for cast restriction tests. Optional `flag`: `forward` (default), `backward`, `strafe_left`, `strafe_right` or `falling` (airborne, as during a jump). |
 | `group` | `actor`, `target`, optional `loot_method` (0-4) and `master_looter` (a player id, read with `loot_method`): fixture party; creates the actor's group if needed, adds an ungrouped player and sets the loot method and master looter. |
 | `loot_roll` | Player `actor`, `item`, `vote` (0 pass, 1 need, 2 greed, 3 disenchant): native `CMSG_LOOT_ROLL` on the group's pending roll for that item (or a level-scaled copy) in which the actor takes part. |
 | `master_loot_give` | Player `actor` as master looter, `item`, `target` (a player id): native `CMSG_LOOT_MASTER_GIVE` of that item from the actor's open loot to the target. |
@@ -577,6 +578,8 @@ effect that picks one of several auras at random),
 `bank_shows`, `system_messages`, `cast_failure`, `pet_is_banker`, `pet_display`, `pet_scale`,
 `pet_knows_spell`, `pet_distance`. `pet_health` and `pet_max_health` read native health and maximum health.
 `equipped_item` takes `slot` (0..18) and reads that equipment slot's item entry, or zero when empty.
+`visible_item` takes the same `slot` and reads the item entry other clients are told to draw there
+(`PLAYER_VISIBLE_ITEM`), which differs from `equipped_item` when a transmog or form hides or replaces it.
 `free_inventory_slots` is how many bag slots the player could still fill, so `fill_bags` plus
 `free_inventory_slots` `equals: 0` is how a scenario states "the bags are full". `mail_count` is the
 number of mails the player holds and `mail_item_count` the items inside them, which is how a reward
@@ -892,6 +895,7 @@ This observes creator metadata; it does not establish a rendered owner title.
 An optional `spell` restricts the count to creatures with that aura; `caster` can select its aura owner. `min_distance` keeps creatures at least that many yards from the player (2D), and `owner_display: true` those wearing the player's display.
 `ranged_weapon_subclass` (0..20) restricts the count to creatures carrying a weapon of that item subclass
 in their ranged virtual equipment slot; subclass 2 means bows. This observes server equipment, not client rendering.
+`sheath_state` (0..2) restricts it to creatures whose server sheath state is unarmed, melee or ranged (2).
 `owned_creature_spacing` requires a player and `entry`. It reads the smallest 2D distance between two of those
 living creatures, selected as `owned_creature_count` does, or zero when fewer than two are present.
 `owned_creature_visible` requires a player and `entry` and reads one matching summon's server visibility,
