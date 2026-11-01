@@ -730,7 +730,7 @@ class spell_sha_earthliving_weapon : public AuraScript
 
         if (SpellInfo const* spellInfo = eventInfo.GetSpellInfo())
         {
-            if (spellInfo->Id == SPELL_SHAMAN_EARTH_SHIELD_HEAL)
+            if (sSpellMgr->GetSpellTwinSource(spellInfo->Id) == SPELL_SHAMAN_EARTH_SHIELD_HEAL)
             {
                 return false;
             }
@@ -1170,6 +1170,8 @@ class spell_sha_nature_guardian : public AuraScript
             return false;
 
         int32 healthpct = GetSpellInfo()->Effects[EFFECT_1].CalcValue();
+        if (!healthpct)
+            healthpct = sSpellMgr->AssertSpellInfo(sSpellMgr->GetSpellTwinSource(GetId()))->Effects[EFFECT_1].CalcValue();
         if (Unit* target = eventInfo.GetActionTarget())
             if (target->HealthBelowPctDamaged(healthpct, damageInfo->GetDamage()))
                 return true;
@@ -1892,14 +1894,15 @@ class spell_sha_static_shock : public AuraScript
         if (!lightningShield)
             return;
 
-        uint32 spellId = sSpellMgr->GetSpellWithRank(SPELL_SHAMAN_LIGHTNING_SHIELD_DAMAGE_R1, lightningShield->GetSpellInfo()->GetRank());
+        uint8 const rank = sSpellMgr->GetSpellInfo(sSpellMgr->GetSpellTwinSource(lightningShield->GetId()))->GetRank();
+        uint32 spellId = sSpellMgr->GetSpellTwinFor(sSpellMgr->GetSpellWithRank(SPELL_SHAMAN_LIGHTNING_SHIELD_DAMAGE_R1, rank), lightningShield->GetId());
         eventInfo.GetActor()->CastSpell(eventInfo.GetActionTarget(), spellId, true, nullptr, aurEff);
         lightningShield->GetBase()->DropCharge();
     }
 
     void Register() override
     {
-        OnEffectProc += AuraEffectProcFn(spell_sha_static_shock::HandleProc, EFFECT_0, SPELL_AURA_DUMMY);
+        OnEffectProc += AuraEffectProcFn(spell_sha_static_shock::HandleProc, EFFECT_0, SPELL_AURA_ANY);
     }
 };
 
@@ -2034,7 +2037,7 @@ class spell_sha_t8_elemental_4p_bonus : public AuraScript
         // Do not proc from Lightning Overload (patch 3.1~)
         if (SpellInfo const* spellInfo = eventInfo.GetSpellInfo())
         {
-            if (spellInfo->Id == SPELL_SHAMAN_LIGHTNING_BOLT_OVERLOAD)
+            if (sSpellMgr->GetSpellTwinSource(spellInfo->Id) == SPELL_SHAMAN_LIGHTNING_BOLT_OVERLOAD)
                 return;
         }
 
