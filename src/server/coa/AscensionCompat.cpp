@@ -217,6 +217,8 @@ constexpr uint16 SMSG_PATCH_QUEST_SUPER_TRACK = 0x06BF;
 constexpr uint16 SMSG_PATCH_SKILL_LINE_ABILITY = 0x0934;
 constexpr uint16 SMSG_PATCH_SPELL_SHAPESHIFT_FORM = 0x0949;
 constexpr uint16 SMSG_PATCH_CREATURE_MODEL_DATA = 0x0974;
+constexpr uint16 SMSG_PATCH_VEHICLE = 0x097A;
+constexpr uint16 SMSG_PATCH_VEHICLE_SEAT = 0x097B;
 constexpr uint32 CUSTOM_DISPLAY_ID_FALLBACK_MIN = 652000;
 constexpr uint32 DISPLAY_PATCH_FALLBACK_DELAY_MS = 5000;
 
@@ -4324,13 +4326,21 @@ public:
     for (VanityCollectionPatchRow const& row : rows.VanityCollections)
       bytes += SendVanityCollectionRow(player, row);
 
+    // Seats first: a Vehicle record names its seats by id.
+    for (VehicleSeatPatchRow const& row : rows.VehicleSeats)
+      bytes += SendVehicleSeatRow(player, row);
+
+    for (VehiclePatchRow const& row : rows.Vehicles)
+      bytes += SendVehicleRow(player, row);
+
     LOG_INFO("coa",
              "Streamed {} CreatureModelData, {} CreatureDisplayInfo, {} ItemDisplayInfo, {} of {} Item, "
-             "{} Spell, {} SuperTrack, {} QuestSuperTrack, {} SkillLineAbility, {} SpellShapeshiftForm and "
-             "{} VanityCollection patch rows ({} bytes) to {} in {} ms",
+             "{} Spell, {} SuperTrack, {} QuestSuperTrack, {} SkillLineAbility, {} SpellShapeshiftForm, "
+             "{} VanityCollection, {} VehicleSeat and {} Vehicle patch rows ({} bytes) to {} in {} ms",
              rows.CreatureModels.size(), sent, rows.ItemDisplayInfos.size(), sentItems.Rows,
              rows.Items.size(), sentSpells, rows.SuperTracks.size(), rows.QuestSuperTracks.size(),
-             rows.SkillLineAbilities.size(), rows.ShapeshiftForms.size(), rows.VanityCollections.size(), bytes,
+             rows.SkillLineAbilities.size(), rows.ShapeshiftForms.size(), rows.VanityCollections.size(),
+             rows.VehicleSeats.size(), rows.Vehicles.size(), bytes,
              player->GetName(), GetMSTimeDiffToNow(startTime));
 
     if (!rows.ShapeshiftForms.empty() && player->GetShapeshiftForm() != FORM_NONE)
@@ -4397,6 +4407,22 @@ private:
     std::array<uint32, 18> Values{};
     std::string Name;
   };
+
+  // SMSG_PATCH_VEHICLE carries one Vehicle.dbc record as 40 dwords followed by
+  // the four missile-target strings (columns 29-32) as sized strings, and
+  // SMSG_PATCH_VEHICLE_SEAT one 58-dword VehicleSeat.dbc record. The client
+  // replaces a known id and inserts an unknown one.
+  static constexpr uint32 VEHICLE_DBC_FIELD_COUNT = 40;
+  static constexpr uint32 VEHICLE_FIRST_STRING_FIELD = 29;
+  static constexpr uint32 VEHICLE_STRING_FIELD_COUNT = 4;
+  static constexpr uint32 VEHICLE_SEAT_DBC_FIELD_COUNT = 58;
+
+  struct VehiclePatchRow {
+    std::array<uint32, VEHICLE_DBC_FIELD_COUNT> Values{};
+    std::array<std::string, VEHICLE_STRING_FIELD_COUNT> Strings;
+  };
+
+  using VehicleSeatPatchRow = std::array<uint32, VEHICLE_SEAT_DBC_FIELD_COUNT>;
 
   static constexpr uint32 VANITY_COLLECTION_DBC_FIELD_COUNT = 77;
   static constexpr uint32 VANITY_COLLECTION_DESCRIPTION_FIELD = 42;
@@ -4495,6 +4521,8 @@ private:
     std::vector<ShapeshiftFormPatchRow> ShapeshiftForms;
     std::vector<CreatureModelPatchRow> CreatureModels;
     std::vector<VanityCollectionPatchRow> VanityCollections;
+    std::vector<VehicleSeatPatchRow> VehicleSeats;
+    std::vector<VehiclePatchRow> Vehicles;
     std::unordered_map<uint32, std::array<std::string, 4>> CreatureDisplayTextures;
   };
 
@@ -5137,6 +5165,93 @@ private:
     return rows;
   }
 
+  std::size_t SendVehicleRow(Player *player, VehiclePatchRow const &row) const {
+    std::size_t size = row.Values.size() * sizeof(uint32);
+    for (std::string const &text : row.Strings)
+      size += sizeof(uint32) + text.size();
+    WorldPacket packet(SMSG_PATCH_VEHICLE, size);
+    for (uint32 value : row.Values)
+      packet << value;
+    for (std::string const &text : row.Strings)
+      AppendSizedString(packet, text);
+    return SendRowPacket(player, packet);
+  }
+
+  std::size_t SendVehicleSeatRow(Player *player, VehicleSeatPatchRow const &row) const {
+    WorldPacket packet(SMSG_PATCH_VEHICLE_SEAT, row.size() * sizeof(uint32));
+    for (uint32 value : row)
+      packet << value;
+    return SendRowPacket(player, packet);
+  }
+
+  // A *_dbc override column as the client record dword: float columns keep
+  // their bit pattern, integer columns (seat ids, animations) wrap -1 to ~0u.
+  static uint32 DbcColumnWord(Field &field) {
+    switch (field.GetType())
+    {
+      case DatabaseFieldTypes::Float:
+      case DatabaseFieldTypes::Double:
+        return std::bit_cast<uint32>(field.Get<float>());
+      default:
+        return static_cast<uint32>(field.Get<int32>());
+    }
+  }
+
+  // Every vehicle_dbc row is a server addition (the table only overrides
+  // Vehicle.dbc), so the whole table is streamed.
+  static std::vector<VehiclePatchRow> LoadVehiclePatchRows() {
+    std::vector<VehiclePatchRow> rows;
+    QueryResult result = WorldDatabase.Query("SELECT * FROM `vehicle_dbc` ORDER BY `ID`");
+    if (!result)
+      return rows;
+
+    if (result->GetFieldCount() != VEHICLE_DBC_FIELD_COUNT)
+    {
+      LOG_ERROR("coa", "vehicle_dbc has {} columns, expected {}; Vehicle rows are not streamed",
+                result->GetFieldCount(), VEHICLE_DBC_FIELD_COUNT);
+      return rows;
+    }
+
+    do {
+      Field *fields = result->Fetch();
+      VehiclePatchRow &row = rows.emplace_back();
+      for (uint32 column = 0; column < VEHICLE_DBC_FIELD_COUNT; ++column)
+      {
+        if (column >= VEHICLE_FIRST_STRING_FIELD &&
+            column < VEHICLE_FIRST_STRING_FIELD + VEHICLE_STRING_FIELD_COUNT)
+        {
+          if (!fields[column].IsNull())
+            row.Strings[column - VEHICLE_FIRST_STRING_FIELD] = fields[column].Get<std::string>();
+          continue;
+        }
+        row.Values[column] = DbcColumnWord(fields[column]);
+      }
+    } while (result->NextRow());
+    return rows;
+  }
+
+  static std::vector<VehicleSeatPatchRow> LoadVehicleSeatPatchRows() {
+    std::vector<VehicleSeatPatchRow> rows;
+    QueryResult result = WorldDatabase.Query("SELECT * FROM `vehicleseat_dbc` ORDER BY `ID`");
+    if (!result)
+      return rows;
+
+    if (result->GetFieldCount() != VEHICLE_SEAT_DBC_FIELD_COUNT)
+    {
+      LOG_ERROR("coa", "vehicleseat_dbc has {} columns, expected {}; VehicleSeat rows are not streamed",
+                result->GetFieldCount(), VEHICLE_SEAT_DBC_FIELD_COUNT);
+      return rows;
+    }
+
+    do {
+      Field *fields = result->Fetch();
+      VehicleSeatPatchRow &row = rows.emplace_back();
+      for (uint32 column = 0; column < VEHICLE_SEAT_DBC_FIELD_COUNT; ++column)
+        row[column] = DbcColumnWord(fields[column]);
+    } while (result->NextRow());
+    return rows;
+  }
+
   static std::vector<ShapeshiftFormPatchRow> LoadShapeshiftFormPatchRows() {
     std::vector<ShapeshiftFormPatchRow> rows;
     QueryResult result = WorldDatabase.Query(
@@ -5270,6 +5385,8 @@ private:
       _rows.SkillLineAbilities = LoadSkillLineAbilityPatchRows();
       _rows.ShapeshiftForms = LoadShapeshiftFormPatchRows();
       _rows.VanityCollections = LoadVanityCollectionPatchRows();
+      _rows.VehicleSeats = LoadVehicleSeatPatchRows();
+      _rows.Vehicles = LoadVehiclePatchRows();
       _rows.CreatureModels = BuildCreatureModelPatchRows();
       _rows.CreatureDisplayTextures = LoadCreatureDisplayTextureRows();
       _rowsPrepared = true;
