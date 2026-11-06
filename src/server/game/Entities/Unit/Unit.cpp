@@ -20,6 +20,7 @@
 #include "AbstractFollower.h"
 #include "AreaDefines.h"
 #include "ArenaSpectator.h"
+#include "AscensionResilientConstitution.h"
 #include "Battlefield.h"
 #include "BattlefieldMgr.h"
 #include "Battleground.h"
@@ -16726,14 +16727,9 @@ void Unit::ApplyResilience(Unit const* victim, float* crit, int32* damage, bool 
     if (!target)
         return;
 
-    // Damage callers have already required player-controlled outgoing damage. The unknown baseline is a
-    // local ten-percent policy; the additional twenty-percent critical reduction is explicit client data.
-    if (damage && *damage > 0 && victim->HasAura(552011))
-    {
-        *damage = int32(int64(*damage) * 90 / 100);
-        if (isCrit)
-            *damage = int32(int64(*damage) * 80 / 100);
-    }
+    // Damage callers have already required player-controlled outgoing damage.
+    if (damage && *damage > 0 && target->HasAura(ResilientConstitution::Aura))
+        *damage = ResilientConstitution::Reduce(*damage, isCrit, target != victim);
 
     switch (type)
     {
@@ -17324,10 +17320,13 @@ void Unit::_ExitVehicle(Position const* exitPosition)
             {
                 pos.RelocateOffset({ seatAddon->ExitParameterX, seatAddon->ExitParameterY, seatAddon->ExitParameterZ, seatAddon->ExitParameterO });
 
-                bool isInLoS = GetMap()->isInLineOfSight(GetPositionX(), GetPositionY(), GetPositionZ(), pos.GetPositionX(), pos.GetPositionY(), pos.GetPositionZ(), GetPhaseMask(), LINEOFSIGHT_ALL_CHECKS, VMAP::ModelIgnoreFlags::Nothing);
+                // Trace from the vehicle at body height: a passenger's seat position comes from the seat offset
+                // alone and can lie below the ground; an exit point a slope puts underground is lifted onto it.
                 float floorZ = GetMapHeight(pos.GetPositionX(), pos.GetPositionY(), pos.GetPositionZ());
+                if (floorZ > INVALID_HEIGHT && pos.GetPositionZ() < floorZ)
+                    pos.m_positionZ = floorZ;
 
-                if (!isInLoS || pos.GetPositionZ() < floorZ)
+                if (floorZ <= INVALID_HEIGHT || !vehicleBase->IsWithinLOS(pos.GetPositionX(), pos.GetPositionY(), pos.GetPositionZ()))
                     pos = vehicleBase->GetPosition();
             }
             else if (seatAddon->ExitParameter == VehicleExitParameters::VehicleExitParamDest)
@@ -18541,7 +18540,7 @@ void Unit::PatchValuesUpdate(ByteBuffer& valuesUpdateBuf, BuildValuesCachePosPoi
     // UNIT_FIELD_BYTES_2
     if (posPointers.UnitFieldBytes2Pos >= 0)
     {
-        if (IsControlledByPlayer() && target != this && sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP) && IsInRaidWith(target))
+        if ((IsControlledByPlayer() || HasUnitFlag(UNIT_FLAG_PLAYER_CONTROLLED)) && target != this && sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP) && IsInRaidWith(target))
         {
             FactionTemplateEntry const* ft1 = GetFactionTemplateEntry();
             FactionTemplateEntry const* ft2 = target->GetFactionTemplateEntry();
@@ -18559,7 +18558,7 @@ void Unit::PatchValuesUpdate(ByteBuffer& valuesUpdateBuf, BuildValuesCachePosPoi
     // UNIT_FIELD_FACTIONTEMPLATE
     if (posPointers.UnitFieldFactionTemplatePos >= 0)
     {
-        if (IsControlledByPlayer() && target != this && sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP) && IsInRaidWith(target))
+        if ((IsControlledByPlayer() || HasUnitFlag(UNIT_FLAG_PLAYER_CONTROLLED)) && target != this && sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP) && IsInRaidWith(target))
         {
             FactionTemplateEntry const* ft1 = GetFactionTemplateEntry();
             FactionTemplateEntry const* ft2 = target->GetFactionTemplateEntry();
@@ -18873,6 +18872,14 @@ void Unit::SetShapeshiftForm(ShapeshiftForm form)
 {
     SetByteValue(UNIT_FIELD_BYTES_2, 3, form);
     sScriptMgr->OnUnitSetShapeshiftForm((Unit*)this, form);
+}
+
+bool Unit::IsOnDivineSteed() const
+{
+    Aura const* divineCharge = GetAura(527272);
+    Unit const* divineCaster = divineCharge ? divineCharge->GetCaster() : nullptr;
+    return divineCaster && divineCaster->IsPlayer() && divineCaster->getClass() == CLASS_MONK &&
+        GetMountID() == 14584 && !IsInFlight();
 }
 
 bool Unit::IsInDisallowedMountForm() const

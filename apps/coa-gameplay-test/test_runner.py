@@ -141,11 +141,26 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             run.validate(scenario)
 
+    def test_lfg_dungeon_takes_an_optional_loot_method(self):
+        step = {'action': 'lfg_dungeon', 'actor': 'caster', 'dungeon': 26}
+        self.assert_step_validates(step)
+        self.assert_step_validates({**step, 'loot_method': 0})
+        for change in ({'loot_method': 5}, {'loot_method': '0'}, {'dungeon': 0}):
+            self.assert_step_rejected({**step, **change})
+
     def test_nearby_creature_can_attack_needs_a_player_and_entry(self):
         step = {'action': 'assert', 'actor': 'caster', 'metric': 'nearby_creature_can_attack', 'entry': 24484,
                 'equals': 0}
         self.assert_step_validates(step)
         for change in ({'actor': 'target'}, {'entry': 0}, {'entry': '24484'}):
+            self.assert_step_rejected({**step, **change})
+        self.assert_step_rejected({key: value for key, value in step.items() if key != 'entry'})
+
+    def test_nearby_creature_at_client_needs_a_player_and_entry(self):
+        step = {'action': 'assert', 'actor': 'caster', 'metric': 'nearby_creature_at_client', 'entry': 5720,
+                'equals': 0}
+        self.assert_step_validates(step)
+        for change in ({'actor': 'target'}, {'entry': 0}, {'entry': '5720'}):
             self.assert_step_rejected({**step, **change})
         self.assert_step_rejected({key: value for key, value in step.items() if key != 'entry'})
 
@@ -1102,6 +1117,19 @@ class RunnerTests(unittest.TestCase):
             invalid['steps'][index][key] = value
             with self.assertRaises(ValueError):
                 run.validate(invalid)
+
+    def test_owned_creature_metrics_need_an_entry(self):
+        for metric in ('owned_creature_damage_total', 'owned_creature_damage_count', 'owned_creature_attack_count',
+                       'owned_creature_heal_count', 'owned_creature_heal_total',
+                       'owned_creature_effective_heal_total'):
+            scenario = copy.deepcopy(self.scenario)
+            scenario['steps'].append({'action': 'assert', 'actor': 'caster', 'metric': metric,
+                                       'entry': 50069, 'min': 0})
+            with self.subTest(metric=metric):
+                self.assertIs(run.validate(scenario), scenario)
+            del scenario['steps'][-1]['entry']
+            with self.subTest(metric=metric, missing_entry=True), self.assertRaises(ValueError):
+                run.validate(scenario)
 
     def test_malformed_scenarios_fail_before_starting_processes(self):
         for change in (

@@ -60,8 +60,10 @@
 #include "AscensionClassTuning.h"
 #include "AscensionBarbarian.h"
 #include "AscensionBarbarianScaling.h"
+#include "AscensionBloodmageDarkwing.h"
 #include "AscensionCustomResourceData.h"
 #include "AscensionFreshCharacterCheck.h"
+#include "AscensionLfgObjective.h"
 #include "AscensionLiveBaselineData.h"
 #include "AscensionRacialAbilities.h"
 #include "AscensionPrimalistEarthquake.h"
@@ -217,6 +219,8 @@ constexpr uint16 SMSG_PATCH_QUEST_SUPER_TRACK = 0x06BF;
 constexpr uint16 SMSG_PATCH_SKILL_LINE_ABILITY = 0x0934;
 constexpr uint16 SMSG_PATCH_SPELL_SHAPESHIFT_FORM = 0x0949;
 constexpr uint16 SMSG_PATCH_CREATURE_MODEL_DATA = 0x0974;
+constexpr uint16 SMSG_PATCH_VEHICLE = 0x097A;
+constexpr uint16 SMSG_PATCH_VEHICLE_SEAT = 0x097B;
 constexpr uint32 CUSTOM_DISPLAY_ID_FALLBACK_MIN = 652000;
 constexpr uint32 DISPLAY_PATCH_FALLBACK_DELAY_MS = 5000;
 
@@ -258,9 +262,9 @@ constexpr uint16 CMSG_QUERY_DELETED_ITEM_RECOVERY = 0x05E2;
 constexpr uint16 CMSG_RECOVER_DELETED_ITEM = 0x05E4;
 constexpr uint16 CMSG_CLAIM_TUTORIAL_REWARD = 0x06A8;
 
-constexpr std::array<uint16, 9> MODULE_EXTENSION_OPCODES = {
+constexpr std::array<uint16, 10> MODULE_EXTENSION_OPCODES = {
     0x0682, 0x0684,
-    0x05DA, 0x05DC,
+    0x05DA, 0x05DC, 0x0774,
     CMSG_QUERY_VENDORED_ITEM_RECOVERY, CMSG_RECOVER_VENDORED_ITEM,
     CMSG_QUERY_DELETED_ITEM_RECOVERY, CMSG_RECOVER_DELETED_ITEM, CMSG_CLAIM_TUTORIAL_REWARD};
 
@@ -416,6 +420,7 @@ constexpr std::array<std::pair<uint32, uint32>, 1> REAPER_ONE_SOUL_CONSUMERS =
 
 constexpr std::size_t APPEARANCE_CATEGORY_COUNT = 69;
 constexpr uint32 APPEARANCE_CATEGORY_AMMUNITION = 32;
+constexpr uint32 APPEARANCE_CATEGORY_ITEM_SET = 55;
 constexpr uint32 APPEARANCE_CATEGORY_SHADOWHOUND = 68;
 constexpr uint32 APPEARANCE_CATEGORY_NECROMANCER_LICH_FORM = 67;
 
@@ -3437,6 +3442,9 @@ public:
                 player->HasAura(SPELL_STORMBRINGER_CHARGED_CONDUIT))
                 break;
 
+            if (rule.ClassId == CLASS_DEMON_HUNTER && player->CanCastDuringChannel(spellInfo))
+                break;
+
             if (rule.PreserveCostAuraSpellId &&
                 player->HasAura(rule.PreserveCostAuraSpellId) &&
                 rule.PreserveCostChancePercent &&
@@ -4075,8 +4083,8 @@ public:
       return;
 
     uint32 const guid = player->GetGUID().GetCounter();
+    player->GetSession()->SetAscensionPatchStreamGuid(0);
     std::lock_guard lock(_mutex);
-    _streamedPlayers.erase(guid);
     _sentItemRows.erase(guid);
     _sentItemSpellRows.erase(guid);
     _onDemandItemRows.erase(guid);
@@ -4089,8 +4097,9 @@ public:
     uint32 const guid = player->GetGUID().GetCounter();
     PatchRowTally onDemand;
     {
+      if (WorldSession* session = player->GetSession())
+        session->SetAscensionPatchStreamGuid(0);
       std::lock_guard lock(_mutex);
-      _streamedPlayers.erase(guid);
       _sentItemRows.erase(guid);
       _sentItemSpellRows.erase(guid);
       _fallbackTimers.erase(guid);
@@ -4259,10 +4268,16 @@ public:
     PreparedPatchRows const &rows = GetPreparedPatchRows();
     {
       std::lock_guard lock(_mutex);
-      if (!_streamedPlayers.insert(guid).second)
+      if (player->GetSession()->GetAscensionPatchStreamGuid() == guid)
         return;
+      player->GetSession()->SetAscensionPatchStreamGuid(guid);
+      _sentItemRows.erase(guid);
+      _sentItemSpellRows.erase(guid);
       _fallbackTimers.erase(guid);
     }
+    WorldSession* session = player->GetSession();
+    bool const sendSpellVisuals = !session->HasAscensionSpellVisualRows();
+    session->SetAscensionSpellVisualRows();
 
     std::vector<ItemPatchRow> itemRows;
     std::unordered_set<uint32> itemIds = CollectOwnedItemIds(player);
@@ -4312,8 +4327,11 @@ public:
     for (QuestSuperTrackPatch const &patch : rows.QuestSuperTracks)
       bytes += SendQuestSuperTrackRow(player, QuestSuperTrackRowFor(patch, player->getRaceMask()));
 
-    bytes += SendSpellVisualRows(player);
-    bytes += SendSoundEntryRows(player);
+    if (sendSpellVisuals)
+    {
+      bytes += SendSpellVisualRows(player);
+      bytes += SendSoundEntryRows(player);
+    }
 
     for (SkillLineAbilityPatchRow const& row : rows.SkillLineAbilities)
         bytes += SendSkillLineAbilityRow(player, row);
@@ -4324,13 +4342,20 @@ public:
     for (VanityCollectionPatchRow const& row : rows.VanityCollections)
       bytes += SendVanityCollectionRow(player, row);
 
+    for (VehicleSeatPatchRow const& row : rows.VehicleSeats)
+      bytes += SendVehicleSeatRow(player, row);
+
+    for (VehiclePatchRow const& row : rows.Vehicles)
+      bytes += SendVehicleRow(player, row);
+
     LOG_INFO("coa",
              "Streamed {} CreatureModelData, {} CreatureDisplayInfo, {} ItemDisplayInfo, {} of {} Item, "
-             "{} Spell, {} SuperTrack, {} QuestSuperTrack, {} SkillLineAbility, {} SpellShapeshiftForm and "
-             "{} VanityCollection patch rows ({} bytes) to {} in {} ms",
+             "{} Spell, {} SuperTrack, {} QuestSuperTrack, {} SkillLineAbility, {} SpellShapeshiftForm, "
+             "{} VanityCollection, {} VehicleSeat and {} Vehicle patch rows ({} bytes) to {} in {} ms",
              rows.CreatureModels.size(), sent, rows.ItemDisplayInfos.size(), sentItems.Rows,
              rows.Items.size(), sentSpells, rows.SuperTracks.size(), rows.QuestSuperTracks.size(),
-             rows.SkillLineAbilities.size(), rows.ShapeshiftForms.size(), rows.VanityCollections.size(), bytes,
+             rows.SkillLineAbilities.size(), rows.ShapeshiftForms.size(), rows.VanityCollections.size(),
+             rows.VehicleSeats.size(), rows.Vehicles.size(), bytes,
              player->GetName(), GetMSTimeDiffToNow(startTime));
 
     if (!rows.ShapeshiftForms.empty() && player->GetShapeshiftForm() != FORM_NONE)
@@ -4397,6 +4422,18 @@ private:
     std::array<uint32, 18> Values{};
     std::string Name;
   };
+
+  static constexpr uint32 VEHICLE_DBC_FIELD_COUNT = 40;
+  static constexpr uint32 VEHICLE_FIRST_STRING_FIELD = 29;
+  static constexpr uint32 VEHICLE_STRING_FIELD_COUNT = 4;
+  static constexpr uint32 VEHICLE_SEAT_DBC_FIELD_COUNT = 58;
+
+  struct VehiclePatchRow {
+    std::array<uint32, VEHICLE_DBC_FIELD_COUNT> Values{};
+    std::array<std::string, VEHICLE_STRING_FIELD_COUNT> Strings;
+  };
+
+  using VehicleSeatPatchRow = std::array<uint32, VEHICLE_SEAT_DBC_FIELD_COUNT>;
 
   static constexpr uint32 VANITY_COLLECTION_DBC_FIELD_COUNT = 77;
   static constexpr uint32 VANITY_COLLECTION_DESCRIPTION_FIELD = 42;
@@ -4495,6 +4532,8 @@ private:
     std::vector<ShapeshiftFormPatchRow> ShapeshiftForms;
     std::vector<CreatureModelPatchRow> CreatureModels;
     std::vector<VanityCollectionPatchRow> VanityCollections;
+    std::vector<VehicleSeatPatchRow> VehicleSeats;
+    std::vector<VehiclePatchRow> Vehicles;
     std::unordered_map<uint32, std::array<std::string, 4>> CreatureDisplayTextures;
   };
 
@@ -5137,6 +5176,89 @@ private:
     return rows;
   }
 
+  std::size_t SendVehicleRow(Player *player, VehiclePatchRow const &row) const {
+    std::size_t size = row.Values.size() * sizeof(uint32);
+    for (std::string const &text : row.Strings)
+      size += sizeof(uint32) + text.size();
+    WorldPacket packet(SMSG_PATCH_VEHICLE, size);
+    for (uint32 value : row.Values)
+      packet << value;
+    for (std::string const &text : row.Strings)
+      AppendSizedString(packet, text);
+    return SendRowPacket(player, packet);
+  }
+
+  std::size_t SendVehicleSeatRow(Player *player, VehicleSeatPatchRow const &row) const {
+    WorldPacket packet(SMSG_PATCH_VEHICLE_SEAT, row.size() * sizeof(uint32));
+    for (uint32 value : row)
+      packet << value;
+    return SendRowPacket(player, packet);
+  }
+
+  static uint32 DbcColumnWord(Field &field) {
+    switch (field.GetType())
+    {
+      case DatabaseFieldTypes::Float:
+      case DatabaseFieldTypes::Double:
+        return std::bit_cast<uint32>(field.Get<float>());
+      default:
+        return static_cast<uint32>(field.Get<int32>());
+    }
+  }
+
+  static std::vector<VehiclePatchRow> LoadVehiclePatchRows() {
+    std::vector<VehiclePatchRow> rows;
+    QueryResult result = WorldDatabase.Query("SELECT * FROM `vehicle_dbc` ORDER BY `ID`");
+    if (!result)
+      return rows;
+
+    if (result->GetFieldCount() != VEHICLE_DBC_FIELD_COUNT)
+    {
+      LOG_ERROR("coa", "vehicle_dbc has {} columns, expected {}; Vehicle rows are not streamed",
+                result->GetFieldCount(), VEHICLE_DBC_FIELD_COUNT);
+      return rows;
+    }
+
+    do {
+      Field *fields = result->Fetch();
+      VehiclePatchRow &row = rows.emplace_back();
+      for (uint32 column = 0; column < VEHICLE_DBC_FIELD_COUNT; ++column)
+      {
+        if (column >= VEHICLE_FIRST_STRING_FIELD &&
+            column < VEHICLE_FIRST_STRING_FIELD + VEHICLE_STRING_FIELD_COUNT)
+        {
+          if (!fields[column].IsNull())
+            row.Strings[column - VEHICLE_FIRST_STRING_FIELD] = fields[column].Get<std::string>();
+          continue;
+        }
+        row.Values[column] = DbcColumnWord(fields[column]);
+      }
+    } while (result->NextRow());
+    return rows;
+  }
+
+  static std::vector<VehicleSeatPatchRow> LoadVehicleSeatPatchRows() {
+    std::vector<VehicleSeatPatchRow> rows;
+    QueryResult result = WorldDatabase.Query("SELECT * FROM `vehicleseat_dbc` ORDER BY `ID`");
+    if (!result)
+      return rows;
+
+    if (result->GetFieldCount() != VEHICLE_SEAT_DBC_FIELD_COUNT)
+    {
+      LOG_ERROR("coa", "vehicleseat_dbc has {} columns, expected {}; VehicleSeat rows are not streamed",
+                result->GetFieldCount(), VEHICLE_SEAT_DBC_FIELD_COUNT);
+      return rows;
+    }
+
+    do {
+      Field *fields = result->Fetch();
+      VehicleSeatPatchRow &row = rows.emplace_back();
+      for (uint32 column = 0; column < VEHICLE_SEAT_DBC_FIELD_COUNT; ++column)
+        row[column] = DbcColumnWord(fields[column]);
+    } while (result->NextRow());
+    return rows;
+  }
+
   static std::vector<ShapeshiftFormPatchRow> LoadShapeshiftFormPatchRows() {
     std::vector<ShapeshiftFormPatchRow> rows;
     QueryResult result = WorldDatabase.Query(
@@ -5270,6 +5392,8 @@ private:
       _rows.SkillLineAbilities = LoadSkillLineAbilityPatchRows();
       _rows.ShapeshiftForms = LoadShapeshiftFormPatchRows();
       _rows.VanityCollections = LoadVanityCollectionPatchRows();
+      _rows.VehicleSeats = LoadVehicleSeatPatchRows();
+      _rows.Vehicles = LoadVehiclePatchRows();
       _rows.CreatureModels = BuildCreatureModelPatchRows();
       _rows.CreatureDisplayTextures = LoadCreatureDisplayTextureRows();
       _rowsPrepared = true;
@@ -5868,7 +5992,6 @@ private:
   }
 
   std::mutex _mutex;
-  std::unordered_set<uint32> _streamedPlayers;
   std::unordered_map<uint32, std::unordered_set<uint32>> _sentItemRows;
   std::unordered_map<uint32, std::unordered_set<uint32>> _sentItemSpellRows;
   std::unordered_map<uint32, PatchRowTally> _onDemandItemRows;
@@ -7687,6 +7810,7 @@ private:
         SendAscensionRunemasterEchoesCooldown(player);
         AscensionDisplayPatchService::Instance().SendPatchStream(player);
         SendServerPetAppearances(player);
+        RefreshAscensionLfgObjectiveDungeon(player);
         LOG_DEBUG("coa", "Resent spell charge state to {} after client world entry",
                   player->GetName());
         break;
@@ -7746,7 +7870,7 @@ private:
 
     for (uint32 categoryId = 1; categoryId < requested.size(); ++categoryId) {
       uint32 appearanceId = requested[categoryId];
-      if (!appearanceId)
+      if (!appearanceId || appearanceId == state->ActiveAppearances[categoryId])
         continue;
 
       if (!state->CollectedAppearances.contains(appearanceId))
@@ -7801,10 +7925,23 @@ private:
       }
     }
 
-    if (requested[55] && !ExpandItemSetAppearance(requested, requested[55]))
+    uint32 const activeItemSet = state->ActiveAppearances[APPEARANCE_CATEGORY_ITEM_SET];
+    uint32 const requestedItemSet = requested[APPEARANCE_CATEGORY_ITEM_SET];
+    if (requestedItemSet != activeItemSet)
     {
-      SendApplyResult(player, "APPLY_APPEARANCES_INVALID_SELECTION");
-      return;
+      if (activeItemSet)
+      {
+        std::array<uint32, APPEARANCE_CATEGORY_COUNT> activeItemSetPieces{};
+        ExpandItemSetAppearance(activeItemSetPieces, activeItemSet);
+        for (uint32 categoryId = 1; categoryId < requested.size(); ++categoryId)
+          if (activeItemSetPieces[categoryId] && requested[categoryId] == activeItemSetPieces[categoryId])
+            requested[categoryId] = 0;
+      }
+      if (requestedItemSet && !ExpandItemSetAppearance(requested, requestedItemSet))
+      {
+        SendApplyResult(player, "APPLY_APPEARANCES_INVALID_SELECTION");
+        return;
+      }
     }
 
     for (auto const& [categoryId, category] : _petCategories)
@@ -7826,6 +7963,7 @@ private:
     RefreshVisibleItems(player);
     RefreshIncarnations(player);
     SendApplyResult(player, "APPLY_APPEARANCES_OK");
+    SendActiveAppearances(player, *state);
   }
 
   static bool RealmAllows(AppearanceInfo const& appearance)
@@ -9894,6 +10032,7 @@ public:
         {
             PrepareAscensionClassMechanicsCast(spell);
             PrepareAscensionBarbarianScaling(spell);
+            PrepareAscensionBloodmageBatBite(spell);
         }
     }
 
