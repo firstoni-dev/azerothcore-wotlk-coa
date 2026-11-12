@@ -52,14 +52,16 @@ CoA.BazaarTokens.WarchestRealmBound = 1
 CoA.BazaarTokens.HourlyCap.Amount = 0
 CoA.BazaarTokens.HourlyCap.WindowSeconds = 3600
 
-# PTR character copy: players copy their own characters from another realm with .ptr list and .ptr copy <name>.
-# Enable it only on the PTR. SourceDatabase is the source realm's characters schema on the same MySQL server;
-# this realm's characters DB user needs SELECT on it. Both realms must share the auth database, because the copy
-# keeps the account id. A character has at most one live copy; after deleting it, the next copy waits
-# CooldownSeconds from the previous one.
-CoA.PtrCopy.Enable = 0
-CoA.PtrCopy.SourceDatabase = ""
-CoA.PtrCopy.SourceRealmName = "Rexxar"
+# PTR character copy: on the live realm players copy their own characters to the PTR with .ptr list and
+# .ptr copy <name>. The live realm saves the character and queues its dump in the shared auth database
+# (coa_ptr_copy_request); the PTR loads queued copies every few seconds, and the live realm then tells the player.
+# Both realms must share the auth database, because the copy keeps the account id.
+# TargetRealmID: on the live realm, the PTR's realmlist id; 0 disables the command.
+# Receive: 1 on the PTR, to load copies queued for its realm id.
+# A character has at most one live copy on the PTR; after deleting it, the next copy waits CooldownSeconds from
+# the previous one.
+CoA.PtrCopy.TargetRealmID = 0
+CoA.PtrCopy.Receive = 0
 CoA.PtrCopy.CooldownSeconds = 3600
 
 # Ascension character screen: enable/disable (activate/deactivate) and the
@@ -880,8 +882,8 @@ Ascension.PrestigiousCache.TbcStages = 0
 #                     0 - normal dungeons only
 #                     1 - Heroic Dungeons
 #                     2 - Mythic Dungeons
-#                     3 - Zul'Gurub
-#                     4 - Molten Core
+#                     3 - Zul'Gurub and the world boss Setis (map 880)
+#                     4 - Molten Core and the world boss Korrim Snowgrave (map 889)
 #                     5 - Onyxia's Lair
 #                     6 - Blackwing Lair
 #                     7 - Ruins of Ahn'Qiraj and Temple of Ahn'Qiraj
@@ -962,10 +964,24 @@ CoA.CallboardContracts.Enable = 1
 CoA.CallboardContracts.DailyCompletions = 1
 
 #
+#    CoA.CallboardContracts.GoldEnable
+#    CoA.CallboardContracts.TokenEnable
+#        Description: Allow Complete Now to be paid with gold or with Bazaar Tokens. A disabled
+#                     currency shows a price of 0 and is refused; with both disabled the Call
+#                     Board hides Complete Now.
+#        Default:     1, 1
+
+CoA.CallboardContracts.GoldEnable = 1
+CoA.CallboardContracts.TokenEnable = 1
+
+#
 #    CoA.CallboardContracts.MoneyCostMultiplier
 #    CoA.CallboardContracts.MinMoneyCost
-#        Description: Gold price of one Complete Now completion: the quest's money reward
-#                     times the multiplier, at least MinMoneyCost copper.
+#        Description: Gold price of the first Complete Now completion of a contract type in a
+#                     reset week: the quest's money reward times the multiplier, at least
+#                     MinMoneyCost copper. Each paid completion of that type, with gold or tokens,
+#                     multiplies the next price by the multiplier again (a multiplier of 1 or less
+#                     keeps the price flat). The count resets at the weekly reset.
 #        Default:     2.0, 100000
 
 CoA.CallboardContracts.MoneyCostMultiplier = 2.0
@@ -974,8 +990,10 @@ CoA.CallboardContracts.MinMoneyCost = 100000
 #
 #    CoA.CallboardContracts.TokenCostMultiplier
 #    CoA.CallboardContracts.MinTokenCost
-#        Description: Bazaar Token price of one Complete Now completion: the quest's Bazaar
-#                     Token reward times the multiplier, at least MinTokenCost tokens.
+#        Description: Bazaar Token price of the first Complete Now completion of a contract type
+#                     in a reset week: the quest's Bazaar Token reward times the multiplier, at
+#                     least MinTokenCost tokens. Each paid completion of that type, with gold or
+#                     tokens, multiplies the next price by the multiplier again.
 #        Default:     2.0, 50
 
 CoA.CallboardContracts.TokenCostMultiplier = 2.0
