@@ -25,7 +25,6 @@
 #include "ArenaTeamMgr.h"
 #include "ArenaSeasonMgr.h"
 #include "AscensionBazaarTokenReserve.h"
-#include "AscensionDisplayPatch.h"
 #include "AscensionPooledVitality.h"
 #include "AscensionCosmeticPetTokens.h"
 #include "AscensionVanityOwnership.h"
@@ -3036,7 +3035,6 @@ void Player::SendInitialSpells()
     }
 
     SendDirectMessage(&data);
-    AscensionDisplayPatch::ResendSkillLineAbilityRows(this);
 }
 
 void Player::SendUnlearnSpells()
@@ -3293,7 +3291,6 @@ void Player::SendLearnPacket(uint32 spellId, bool learn, bool keepActionButtons 
         data << uint32(spellId);
         data << uint16(0);
         SendDirectMessage(&data);
-        AscensionDisplayPatch::ResendSkillLineAbilityRows(this, spellId);
     }
     else
     {
@@ -3341,8 +3338,9 @@ bool Player::addSpell(uint32 spellId, uint8 addSpecMask, bool updateActive, bool
                     }
                     else if (IsInWorld())
                     {
+                        // The client holds a rank shown as its temporary replacement only under that replacement.
                         WorldPacket data(SMSG_SUPERCEDED_SPELL, 4 + 4);
-                        data << uint32(nextSpellInfo->Id);
+                        data << uint32(GetClientShownSupersededSpell(nextSpellInfo->Id));
                         data << uint32(spellInfo->Id);
                         SendDirectMessage(&data);
                     }
@@ -10618,8 +10616,9 @@ void Player::ApplySpellMod(uint32 spellId, SpellModOp op, T& basevalue, Spell* s
                 AuraAlsoModifiesCastingTime(mod->ownerAura))
                 return;
 
-            // xinef: those two mods should be multiplicative (Glyph of Renew)
-            if (mod->op == SPELLMOD_DAMAGE || mod->op == SPELLMOD_DOT)
+            // xinef: those two mods should be multiplicative (Glyph of Renew); Ascension's damage-by-victim mods too
+            if (mod->op == SPELLMOD_DAMAGE || mod->op == SPELLMOD_DOT ||
+                mod->op == SPELLMOD_DAMAGE_VS_PLAYERS || mod->op == SPELLMOD_DAMAGE_VS_CREATURES)
                 totalmul *= CalculatePct(1.0f, 100.0f + mod->value);
             else
                 totalmul += CalculatePct(1.0f, mod->value);
@@ -10662,13 +10661,25 @@ void Player::ApplySpellMod(uint32 spellId, SpellModOp op, T& basevalue, Spell* s
         }
     }
 
+    if (spell && op == SPELLMOD_DAMAGE && spell->GetSpellInfo()->Id == spellId && !temporaryPet)
+        if (uint64 const nightmare = spell->GetScriptValue(AscensionBloodmage::NightmareTalent))
+            totalmul *= CalculatePct(1.0f, 100.0f + float(nightmare));
+
+    int32 reachFlat = 0;
     for (auto mod : m_spellMods[op])
     {
         if (!IsAffectedBySpellmod(spellInfo, mod, spell))
             continue;
 
+        if (op == SPELLMOD_RANGE && AscensionReach::IsReachModifier(mod))
+        {
+            reachFlat = std::max(reachFlat, mod->value);
+            continue;
+        }
+
         calculateSpellMod(mod);
     }
+    totalflat += reachFlat;
 
     if (op == SPELLMOD_CASTING_TIME || op == SPELLMOD_DURATION)
         basevalue = (basevalue + totalflat) > 0 ? (basevalue + totalflat) * totalmul : 0;
@@ -10680,6 +10691,24 @@ template AC_GAME_API void Player::ApplySpellMod(uint32 spellId, SpellModOp op, i
 template AC_GAME_API void Player::ApplySpellMod(uint32 spellId, SpellModOp op, uint32& basevalue, Spell* spell, bool temporaryPet);
 template AC_GAME_API void Player::ApplySpellMod(uint32 spellId, SpellModOp op, float& basevalue, Spell* spell, bool temporaryPet);
 
+SpellSchoolMask Player::GetAscensionSchoolOverride(SpellInfo const* spellInfo, Spell* spell)
+{
+    for (SpellModifier* mod : m_spellMods[SPELLMOD_SCHOOL_OVERRIDE])
+    {
+        if (!IsAffectedBySpellmod(spellInfo, mod, spell))
+            continue;
+
+        if (SpellInfo const* carrier = sSpellMgr->GetSpellInfo(mod->spellId))
+        {
+            // recorded on the cast, so a charged carrier spends its charge on it
+            ApplyModToSpell(mod, spell);
+            return carrier->GetSchoolMask();
+        }
+    }
+
+    return SPELL_SCHOOL_MASK_NONE;
+}
+
 bool Player::UsesAscensionSpellModifierLayout() const
 {
     return GetSession() && GetSession()->IsAscensionCompatEnabled();
@@ -10687,7 +10716,7 @@ bool Player::UsesAscensionSpellModifierLayout() const
 
 uint32 Player::GetClientSpellModCount() const
 {
-    return UsesAscensionSpellModifierLayout() ? MAX_SPELLMOD : MAX_CLIENT_SPELLMOD;
+    return UsesAscensionSpellModifierLayout() ? MAX_ASCENSION_CLIENT_SPELLMOD : MAX_CLIENT_SPELLMOD;
 }
 
 void Player::SendSpellModifier(uint16 opcode, uint8 eff, uint8 op, int32 value, uint32 spellFamily) const
@@ -14273,6 +14302,21 @@ void Player::SetTemporarySpellReplacement(uint32 original, uint32 replacement, b
     }
 }
 
+uint32 Player::GetClientShownSupersededSpell(uint32 superseded) const
+{
+    auto itr = m_temporarySpellReplacements.find(superseded);
+    if (itr == m_temporarySpellReplacements.end() || !HasActiveSpell(itr->second))
+        return superseded;
+
+    uint32 const replacement = itr->second;
+    bool const shownByAnother = std::any_of(m_temporarySpellReplacements.begin(), m_temporarySpellReplacements.end(),
+        [this, superseded, replacement](auto const& entry)
+        {
+            return entry.first != superseded && entry.second == replacement && HasActiveSpell(entry.first);
+        });
+    return shownByAnother ? superseded : replacement;
+}
+
 uint32 Player::GetTemporarySpellReplacement(uint32 original) const
 {
     auto itr = m_temporarySpellReplacements.find(original);
@@ -17038,6 +17082,8 @@ void Player::RefundItem(Item* item)
             ASSERT(msg == EQUIP_ERR_OK); /// Already checked before
             Item* it = StoreNewItem(dest, itemid, true, true);
             SendNewItem(it, count, true, false, true);
+            if (itemid == AscensionBazaarTokenReserve::TOKEN_ITEM)
+                AscensionBazaarTokenReserve::AddReserve(this, count);
         }
     }
 
